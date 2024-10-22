@@ -2,7 +2,10 @@ import os
 import discord
 from dotenv import load_dotenv
 from discord.ext import commands
-import cmd.ping as ping
+from importlib import import_module
+# import cmd.ping as ping
+# import cmd.voice as voice
+# import cmd.leave as leave
 
 # Load biến môi trường từ file .env
 load_dotenv()
@@ -25,12 +28,21 @@ async def on_ready():
     await bot.tree.sync()  # Đăng ký lệnh toàn cầu
     print("Global commands synced!")
 
-ping.setup(bot)
-# # Tạo một lệnh toàn cầu (global slash command)
-# @bot.tree.command(name="ping", description="Ping command to check the bot's latency")
-# async def ping(interaction: discord.Interaction):
-#     latency_ms = bot.latency * 1000
-#     await interaction.response.send_message(f"Pong! {latency_ms:.0f} ms")
+# ping.setup(bot)
+# voice.setup(bot)
+# leave.setup(bot)
+
+# Thư mục chứa các lệnh
+cmd_folder = './cmd'
+
+# Lấy tất cả các file .py trong thư mục cmd và import chúng
+for filename in os.listdir(cmd_folder):
+    if filename.endswith('.py') and filename != '__init__.py':
+        module_name = filename[:-3]
+        module = import_module(f'cmd.{module_name}')
+        # Gọi setup cho từng module nếu có
+        if hasattr(module, 'setup'):
+            module.setup(bot)
 
 # Khởi động bot
 bot.run(DISCORD_TOKEN)

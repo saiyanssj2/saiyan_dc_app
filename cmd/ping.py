@@ -1,5 +1,4 @@
 import discord
-from discord.ext import commands
 
 def setup(bot):
     # Tạo lệnh toàn cầu (global slash command)
