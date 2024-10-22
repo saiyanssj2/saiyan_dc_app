@@ -3,9 +3,6 @@ import discord
 from dotenv import load_dotenv
 from discord.ext import commands
 from importlib import import_module
-# import cmd.ping as ping
-# import cmd.voice as voice
-# import cmd.leave as leave
 
 # Load biến môi trường từ file .env
 load_dotenv()
@@ -28,13 +25,9 @@ async def on_ready():
     await bot.tree.sync()  # Đăng ký lệnh toàn cầu
     print("Global commands synced!")
 
-# ping.setup(bot)
-# voice.setup(bot)
-# leave.setup(bot)
-
-# Thư mục chứa các lệnh
+# Sử dụng cmd
+# Thư mục chứa các lệnh cmd
 cmd_folder = './cmd'
-
 # Lấy tất cả các file .py trong thư mục cmd và import chúng
 for filename in os.listdir(cmd_folder):
     if filename.endswith('.py') and filename != '__init__.py':

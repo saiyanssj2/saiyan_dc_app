@@ -1,27 +1,67 @@
+import os
 import discord
+import asyncio
+from discord.ext import commands
+
+# Đường dẫn đến thư mục chứa các tệp âm thanh
+AUDIO_FOLDER = r'E:/Adobe'
+
+def list_audio_files(folder_path):
+    # Lấy danh sách các tệp âm thanh từ thư mục
+    return [f for f in os.listdir(folder_path) if f.endswith(('.mp3', '.wav'))]
 
 def setup(bot):
-    # Tạo lệnh toàn cầu (global slash command)
-    @bot.tree.command(name="voice", description="voice")
-    async def voice(interaction: discord.Interaction):
-        # Kiểm tra xem người dùng có đang ở trong kênh thoại không
-        if not interaction.user.voice:
-            await interaction.response.send_message("Bạn cần ở trong một kênh thoại để sử dụng lệnh này!")
-            return
-
+    @bot.tree.command(name="voice")
+    async def voice(interaction: discord.Interaction, folder: str = None, file: str = None):
         voice_channel = interaction.user.voice.channel
 
-        # Kết nối bot với kênh thoại
-        if not interaction.guild.voice_client:
-            await interaction.response.send_message(f"Đang tham gia kênh {voice_channel.name}...")
-            voice_client = await voice_channel.connect()
-        else:
-            voice_client = interaction.guild.voice_client
+        if voice_channel is not None:
+            # Kiểm tra xem bot đã kết nối chưa
+            voice_client = discord.utils.get(bot.voice_clients, guild=interaction.guild)
 
-        # Phát âm thanh
-        audio_source = discord.FFmpegPCMAudio(r'''E:\Adobe\z.mp3''')  # Đường dẫn tới file âm thanh
-        if not voice_client.is_playing():
-            voice_client.play(audio_source, after=lambda e: print(f'Hoàn thành phát âm thanh: {e}'))
-            await interaction.response.send_message("Đang phát âm thanh!")
+            if voice_client is None:
+                # Kết nối đến kênh thoại nếu chưa có kết nối
+                voice_client = await voice_channel.connect()
+
+            if folder is not None:
+                # Tạo đường dẫn đầy đủ tới thư mục
+                folder_path = os.path.join(AUDIO_FOLDER, folder)
+
+                if os.path.isdir(folder_path):
+                    folder_audio_files = list_audio_files(folder_path)
+
+                    if folder_audio_files:
+                        # Gửi phản hồi khi bắt đầu phát âm thanh từ thư mục
+                        await interaction.response.send_message(f"Đang phát âm thanh từ thư mục: {folder}")
+
+                        for file_to_play in folder_audio_files:
+                            audio_source = discord.FFmpegPCMAudio(os.path.join(folder_path, file_to_play))
+                            voice_client.play(audio_source)
+
+                            # Đợi cho đến khi âm thanh hoàn thành
+                            while voice_client.is_playing():
+                                await asyncio.sleep(1000)
+
+                    else:
+                        await interaction.response.send_message(f"Không có tệp âm thanh nào trong thư mục '{folder}'.")
+                else:
+                    await interaction.response.send_message(f"Không tìm thấy thư mục '{folder}'.")
+            elif file is not None:
+                # Nếu có tham số file, phát tệp âm thanh tương ứng
+                audio_files = list_audio_files(AUDIO_FOLDER)
+                matching_files = [f for f in audio_files if f.lower().startswith(file.lower())]
+
+                if matching_files:
+                    file_to_play = matching_files[0]  # Lấy tệp đầu tiên khớp
+                    audio_source = discord.FFmpegPCMAudio(os.path.join(AUDIO_FOLDER, file_to_play))
+
+                    # Gửi phản hồi khi bắt đầu phát âm thanh
+                    await interaction.response.send_message(f"Đang phát âm thanh: {file_to_play}")
+                    voice_client.play(audio_source)
+
+                else:
+                    await interaction.response.send_message(f"Không tìm thấy tệp nào bắt đầu bằng '{file}'.")
+            else:
+                await interaction.response.send_message("Bạn cần chỉ định một tên file hoặc tên thư mục để phát âm thanh.")
         else:
-            await interaction.response.send_message("Đã có âm thanh đang phát!")
+            await interaction.response.send_message("Bạn cần ở trong một kênh thoại để phát âm thanh.")
