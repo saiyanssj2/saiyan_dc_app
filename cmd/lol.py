@@ -110,6 +110,7 @@ def setup(bot):
                                 dialogue_set.add(description)
 
                     if audio_links:
+                        voice_client.play(discord.FFmpegPCMAudio(audio_links[1]))
                         # Tạo một view chứa các nút phát âm thanh và nút stop
                         view = AudioPlayer(audio_links, audio_descriptions, voice_client)
                         # Gửi message kèm các nút
