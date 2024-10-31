@@ -9,8 +9,9 @@ ffmpeg_options = {
 }
 
 class YouTubePlayer(discord.ui.View):
-    def __init__(self, songs, voice_client):
+    def __init__(self, bot, songs, voice_client):
         super().__init__(timeout=None)
+        self.bot = bot
         self.songs = songs
         self.voice_client = voice_client
         self.current_song_index = 0
@@ -18,6 +19,7 @@ class YouTubePlayer(discord.ui.View):
         self.current_page = 0
         self.total_pages = (len(self.songs) + self.page_size - 1) // self.page_size
         self.loop_mode = 0  # 0: No loop, 1: Loop one, 2: Loop all
+        self.is_playing = False
 
         # Cập nhật nút phát và điều hướng
         self.update_page_buttons()
@@ -42,7 +44,8 @@ class YouTubePlayer(discord.ui.View):
     async def play_song(self, index, interaction):
         self.current_song_index = index
         audio_source = discord.FFmpegPCMAudio(self.songs[index]['url'], **ffmpeg_options)
-        self.voice_client.play(audio_source)
+        self.is_playing = True
+        self.voice_client.play(audio_source, after=lambda e: asyncio.run_coroutine_threadsafe(self.send_now_playing(interaction), self.bot.loop))
         await self.send_now_playing(interaction)
 
     async def send_now_playing(self, interaction):
@@ -178,9 +181,20 @@ def setup(bot):
             else:
                 songs = [{"title": data["title"], "url": data["url"]}]
 
-            view = YouTubePlayer(songs, voice_client)
-            await view.play_song(0, interaction)
-            bot.current_player_view = view
+            if not hasattr(bot, 'current_player_view'):
+                print("1.current_player_view=none")
+                view = YouTubePlayer(bot, songs, voice_client)
+                await view.play_song(0, interaction)
+                bot.current_player_view = view
+                print(view.songs)
+                print(f"is_playing={view.is_playing}")
+            else:
+                print("2.current_player_view")
+                bot.current_player_view.songs += songs
+                await bot.current_player_view.send_now_playing(interaction)
+                print(bot)
+                print(bot.current_player_view)
+                print(bot.current_player_view.songs)
 
         # Khởi chạy load_playlist không đồng bộ
         asyncio.create_task(load_playlist())

@@ -3,6 +3,7 @@ python-dotenv
 asyncio
 # yt
 yt-dlp
-pynacl
 # lol
+pynacl
 beautifulsoup4
+# cai dat ffmpeg
