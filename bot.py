@@ -10,9 +10,6 @@ load_dotenv()
 DISCORD_TOKEN = os.getenv('DISCORD_TOKEN')
 GUILD_ID = os.getenv('GUILD_ID')
 
-import discord
-from discord.ext import commands
-
 # Tạo bot với intent
 intents = discord.Intents.default()
 intents.message_content = True

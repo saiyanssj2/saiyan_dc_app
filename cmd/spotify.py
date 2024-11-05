@@ -34,10 +34,13 @@ def setup(bot):
             async def fetch_spotify_data(key):
                 return await loop.run_in_executor(executor, lambda: spotdl.search(key))
 
+            songs = []
             spotify_url = await fetch_spotify_data(key)
             if spotify_url:
-                song = {"title": spotify_url['name'], "url": spotify_url['url']}
-                music_queue.add((song['title'], song['url']))
+                # song = {"title": spotify_url['name'], "url": spotify_url['url']}
+                # music_queue.add((song['title'], song['url']))
+                for track in spotify_url:
+                    songs.append({"title": track['name'], "url": track['url']})
                 
                 # Kết nối voice client và phát nhạc nếu chưa có
                 voice_client = discord.utils.get(bot.voice_clients, guild=interaction.guild)

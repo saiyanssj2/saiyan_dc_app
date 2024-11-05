@@ -6,7 +6,7 @@ ffmpeg_options = {
     'options': '-vn -filter:a "volume=0.25"'
 }
 
-async def play_next(voice_client, music_queue, interaction):
+async def play_next(voice_client, music_queue, interaction, bot):
     # Kiểm tra xem có bài nào trong hàng đợi không
     next_song = music_queue.get_next()
     if next_song:
@@ -20,7 +20,7 @@ async def play_next(voice_client, music_queue, interaction):
             if error:
                 print(f'Error: {error}')
             # Sử dụng asyncio để lên lịch cho bài hát tiếp theo sau khi kết thúc
-            future = asyncio.run_coroutine_threadsafe(play_next(voice_client, music_queue, interaction), bot.loop)
+            future = asyncio.run_coroutine_threadsafe(play_next(voice_client, music_queue, interaction, bot), bot.loop)
             try:
                 future.result()
             except Exception as e:

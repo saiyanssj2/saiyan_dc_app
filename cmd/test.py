@@ -56,10 +56,8 @@ def setup(bot):
             voice_client = discord.utils.get(bot.voice_clients, guild=interaction.guild)
             if not voice_client:
                 voice_client = await channel.connect()
-                await dc_nextsong.play_next(voice_client, music_queue, interaction)
+                await dc_nextsong.play_next(voice_client, music_queue, interaction, bot)
             else:
                 await interaction.followup.send(f"Queued!")
         else:
             await interaction.followup.send("Bạn cần tham gia kênh voice để phát nhạc.")
-
-    
