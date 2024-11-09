@@ -10,6 +10,7 @@ async def play_next(voice_client, music_queue, interaction, bot):
     # Kiểm tra xem có bài nào trong hàng đợi không
     next_song = music_queue.get_next()
     if next_song:
+        print(next_song)
         title, url = next_song
         music_queue.is_playing = True
         print(f'Now playing: {title}')

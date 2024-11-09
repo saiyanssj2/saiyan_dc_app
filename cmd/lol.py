@@ -70,7 +70,6 @@ class AudioPlayer(discord.ui.View):
         view = AudioPlayer(self.audio_links, self.audio_descriptions, self.voice_client, page=self.page + 1)
         await interaction.response.edit_message(view=view)
 
-
 def setup(bot):
     @bot.tree.command(name="lol", description="Cho tao cái tên, chữ đầu viết hoa")
     async def lol(interaction: discord.Interaction, champion: str, desc: str = None):
