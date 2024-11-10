@@ -1,5 +1,6 @@
 import os
 import discord
+import asyncio
 from dotenv import load_dotenv
 from discord import app_commands
 import spotipy
@@ -20,13 +21,15 @@ def setup(bot):
     @app_commands.describe(key="URL Spotify")
     async def spotify(interaction: discord.Interaction, key: str):
         id = key.split("/")[-1].split("?")[0]
+        tracks = []
         if key.split("/")[-2].split("?")[0] == 'playlist':
             data = sp.playlist(id)
-            tracks = [{"title": track['track']['name'], "url": track['track']['external_urls']['spotify']} for track in data['tracks']['items']]
+            tracks.extend({"query": track['track']['name'] + " " + " ".join([artist['name'] for artist in track['track']['artists']])} for track in data['tracks']['items'])
         else:
             data = sp.track(id)
-            tracks = {"title": data['name'], "url": data['external_urls']['spotify']}
+            tracks.append({"query": data['name'] + " " + " ".join([artist['name'] for artist in data['artists']])})
 
         if tracks:
-            for track in tracks:
-                await cmd.play.test(interaction, bot, track['title'])
+            await interaction.response.defer()
+            tasks = [cmd.play.test(interaction, bot, track['query']) for track in tracks]
+            await asyncio.gather(*tasks)

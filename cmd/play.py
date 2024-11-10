@@ -7,14 +7,17 @@ from concurrent.futures import ThreadPoolExecutor
 from lib import dc_nextsong, dc_queue
 
 # Cấu hình YoutubeDL
-ydl_opts = {
-    'format': 'bestaudio/best',
-    'extractaudio': True,
-    'audioformat': 'mp3',
-    'outtmpl': '%(extractor)s-%(id)s-%(title)s.%(ext)s',
-    'quiet': True,
-    "default_search": "ytsearch"
-}
+def get_ydl(query):
+    is_url = re.match(r'^(https?://)?(www\.)?(youtube\.com|youtu\.?be)/.+$', query)
+    return {
+        'format': 'bestaudio/best',
+        'extractaudio': True,
+        'audioformat': 'mp3',
+        'outtmpl': '%(extractor)s-%(id)s-%(title)s.%(ext)s',
+        'quiet': True,
+        "default_search": "ytsearch",
+        "extract_flat": "in_playlist" if is_url else None
+    }
 
 music_queues = {}
 executor = ThreadPoolExecutor()
@@ -23,11 +26,12 @@ def setup(bot):
     @bot.tree.command(name="p", description="Play music")
     @app_commands.describe(query="Enter song name or link")
     async def play(interaction: discord.Interaction, query: str):
+        await interaction.response.defer()
         await test(interaction, bot, query)
 
 async def test(interaction, bot, query):
-    await interaction.response.defer()
     print(query)
+    ydl_opts = get_ydl(query)
     user = interaction.user
     if user.voice:
         channel = user.voice.channel
