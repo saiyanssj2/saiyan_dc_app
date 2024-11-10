@@ -46,6 +46,7 @@ async def test(interaction, bot, query, mess=True):
         if "entries" in data:
             entries = [{"title": i["title"], "url": i["url"]} for i in data["entries"] if i["uploader_id"] is not None][:300]
             if re.match(r'^(https?://)?(www\.)?(youtube\.com|youtu\.?be)/.+$', entries[0]['url']):
+                count_ = 1
                 async def fetch_song(entry):
                     return await loop.run_in_executor(executor, lambda: YoutubeDL(ydl_opts).extract_info(entry['url'], download=False))
                 datas = await asyncio.gather(*(fetch_song(entry) for entry in entries))

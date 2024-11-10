@@ -1,5 +1,10 @@
 import discord
 
+"""
+⏯️▶️⏸⏹⏮⏪⬅️➡️⏩⏭🔁🔂🔄🔀🔊🔉❤️💖💔🛑🚫❌✅❎↻⟳⇆
+#️⃣0️⃣1️⃣2️⃣3️⃣4️⃣5️⃣6️⃣7️⃣8️⃣9️⃣🇻🇳
+"""
+
 class AudioPlayer(discord.ui.View):
     def __init__(self, audio_links, audio_descriptions, voice_client, page=0):
         super().__init__(timeout=None)
