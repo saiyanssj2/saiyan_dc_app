@@ -31,5 +31,9 @@ def setup(bot):
 
         if tracks:
             await interaction.response.defer()
-            tasks = [cmd.play.test(interaction, bot, track['query']) for track in tracks]
+            tasks = [cmd.play.test(interaction, bot, track['query'], mess=False) for track in tracks]
             await asyncio.gather(*tasks)
+            if len(tracks) == 1:
+                await interaction.followup.send(f"Đã thêm {tracks[0]['query']} vào hàng đợi!")
+            else:
+                await interaction.followup.send(f"Đã thêm {len(tracks)} bài Spotify vào hàng đợi!")

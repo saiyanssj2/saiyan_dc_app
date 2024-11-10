@@ -4,7 +4,7 @@ import asyncio
 from discord import app_commands
 from yt_dlp import YoutubeDL
 from concurrent.futures import ThreadPoolExecutor
-from lib import dc_nextsong, dc_queue
+from utils import dc_nextsong, dc_queue
 
 # Cấu hình YoutubeDL
 def get_ydl(query):
@@ -29,7 +29,7 @@ def setup(bot):
         await interaction.response.defer()
         await test(interaction, bot, query)
 
-async def test(interaction, bot, query):
+async def test(interaction, bot, query, mess=True):
     print(query)
     ydl_opts = get_ydl(query)
     user = interaction.user
@@ -49,12 +49,14 @@ async def test(interaction, bot, query):
                 async def fetch_song(entry):
                     return await loop.run_in_executor(executor, lambda: YoutubeDL(ydl_opts).extract_info(entry['url'], download=False))
                 datas = await asyncio.gather(*(fetch_song(entry) for entry in entries))
+                count_ = len(datas)
                 for i in datas:
                     music_queue.add((i['title'], i['url']))
             else:
                 for i in entries:
                     music_queue.add((i['title'], i['url']))
         else:
+            count_ = 1
             music_queue.add((data['title'], data['url']))
 
         voice_client = discord.utils.get(bot.voice_clients, guild=interaction.guild)
@@ -62,6 +64,12 @@ async def test(interaction, bot, query):
             voice_client = await channel.connect()
             await dc_nextsong.play_next(voice_client, music_queue, interaction, bot)
         else:
-            await interaction.followup.send(f"Queued! {len(music_queue.queue)} bài!")
+            if mess:
+                # await interaction.followup.send(f"Queued! {len(music_queue.queue)} bài!")
+                if count_ == 1:
+                    await interaction.followup.send(f"Đã thêm {data['title']} vào hàng đợi!")
+                else:
+                    await interaction.followup.send(f"Đã thêm {count_} bài vào hàng đợi!")
     else:
-        await interaction.followup.send("Join vào 1 voice chat đi thằng ngoo!")
+        if mess:
+            await interaction.followup.send("Join vào 1 voice chat đi thằng ngoo!")

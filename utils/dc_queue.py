@@ -30,20 +30,20 @@ class MusicQueue:
 
     def set_favorite(self):
         self.fav_queue.append(self.song)
-        with open(r"lib\fav.txt", "a") as file:
+        with open(r"utils\fav.txt", "a") as file:
             pickle.dump(self.song, file)
 
     def get_favorite(self):
         self.save_queue.append(self.song)
-        with open(r"lib\fav.txt", "r") as file:
+        with open(r"utils\fav.txt", "r") as file:
             self.queue = pickle.load(file)
 
     def set_save(self):
         self.fav_queue.append(self.song)
-        with open(r"lib\sav.pkl", "ab") as file:
+        with open(r"utils\sav.pkl", "ab") as file:
             pickle.dump(self.song, file)
 
     def get_save(self):
         self.save_queue.append(self.song)
-        with open(r"lib\sav.pkl", "rb") as file:
+        with open(r"utils\sav.pkl", "rb") as file:
             self.queue = pickle.load(file)
