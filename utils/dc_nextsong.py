@@ -1,5 +1,6 @@
 import discord
 import asyncio
+from utils.audio_player import AudioPlayer
 
 ffmpeg_options = {
     'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
@@ -12,8 +13,9 @@ async def play_next(voice_client, music_queue, interaction, bot):
     if next_song:
         title, url = next_song
         music_queue.is_playing = True
-        print(f'Now playing: {title}')
-        await interaction.followup.send(f"Now playing: {title}")
+        
+        view = AudioPlayer(music_queue, voice_client, interaction, bot)
+        await interaction.followup.send(f"Now playing: {title}", view=view)
         # Phát nhạc và xử lý callback khi nhạc kết thúc
         def on_song_end(error):
             # Nếu có lỗi, in ra lỗi

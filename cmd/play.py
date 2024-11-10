@@ -30,7 +30,6 @@ def setup(bot):
         await test(interaction, bot, query)
 
 async def test(interaction, bot, query, mess=True):
-    print(query)
     ydl_opts = get_ydl(query)
     user = interaction.user
     if user.voice:
