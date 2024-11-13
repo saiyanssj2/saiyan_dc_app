@@ -4,7 +4,7 @@ import asyncio
 from discord import app_commands
 from yt_dlp import YoutubeDL
 from concurrent.futures import ThreadPoolExecutor
-from utils import dc_nextsong, dc_queue
+from utils import dc_nextsong, dc_queue, vqib
 
 # Cấu hình YoutubeDL
 def get_ydl(query):
@@ -14,22 +14,28 @@ def get_ydl(query):
         'extractaudio': True,
         'audioformat': 'mp3',
         'outtmpl': '%(extractor)s-%(id)s-%(title)s.%(ext)s',
-        'quiet': True,
+        # 'quiet': True,
         "default_search": "ytsearch",
-        "extract_flat": "in_playlist" if is_url else None
+        "extract_flat": "in_playlist" if is_url else None,
+        'geo_bypass': True,
+        'geo_bypass_country': 'US',
+        'playlist_items': '1-50'
     }
 
 music_queues = {}
 executor = ThreadPoolExecutor()
+vqib_play = vqib.VQIB()
 
 def setup(bot):
     @bot.tree.command(name="p", description="Play music")
     @app_commands.describe(query="Enter song name or link")
     async def play(interaction: discord.Interaction, query: str):
         await interaction.response.defer()
-        await test(interaction, bot, query)
+        await start(interaction, bot, query)
 
-async def test(interaction, bot, query, mess=True):
+async def start(interaction, bot, query, mess=True):
+    vqib_play.interaction = interaction
+    vqib_play.bot = bot
     ydl_opts = get_ydl(query)
     user = interaction.user
     if user.voice:
