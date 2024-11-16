@@ -1,7 +1,16 @@
 def greet(name):
     return "hello "+name
-1+1
-greet_someone = greet
-# print greet_someone("John")
 
-# Outputs: hello John
+greet_someone = greet
+greet_someone("John")
+
+def greet(name):
+    def get_message():
+        return "Hello "
+
+    result = get_message()+name
+    return result
+
+greet("John")
+
+# Outputs: Hello John
