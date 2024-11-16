@@ -27,7 +27,7 @@ executor = ThreadPoolExecutor()
 vqib_play = vqib.VQIB()
 
 def setup(bot):
-    @bot.tree.command(name="p", description="Play music")
+    @bot.tree.command(name="play", description="Play music")
     @app_commands.describe(query="Enter song name or link")
     async def play(interaction: discord.Interaction, query: str):
         await interaction.response.defer()
