@@ -1,0 +1,10 @@
+discord.py
+python-dotenv
+asyncio
+# yt
+yt-dlp
+# lol
+pynacl
+beautifulsoup4
+# cai dat ffmpeg
+spotdl
