@@ -1,6 +1,7 @@
 import discord
 import requests
 from bs4 import BeautifulSoup
+from bot import bot
 
 class AudioPlayer(discord.ui.View):
     def __init__(self, audio_links, audio_descriptions, voice_client, page=0):
@@ -70,68 +71,67 @@ class AudioPlayer(discord.ui.View):
         view = AudioPlayer(self.audio_links, self.audio_descriptions, self.voice_client, page=self.page + 1)
         await interaction.response.edit_message(view=view)
 
-def setup(bot):
-    @bot.tree.command(name="lol", description="Cho tao cái tên, chữ đầu viết hoa")
-    async def lol(interaction: discord.Interaction, champion: str, desc: str = None):
-        if interaction.user.voice is not None:
-            # Kiểm tra xem bot đã kết nối chưa
-            voice_client = discord.utils.get(bot.voice_clients, guild=interaction.guild)
-            voice_channel = interaction.user.voice.channel
-            if voice_client is None:
-                # Kết nối đến kênh thoại nếu chưa có kết nối
-                voice_client = await voice_channel.connect()
+@bot.tree.command(name="lol", description="Cho tao cái tên, chữ đầu viết hoa")
+async def lol(interaction: discord.Interaction, champion: str, desc: str = None):
+    if interaction.user.voice is not None:
+        # Kiểm tra xem bot đã kết nối chưa
+        voice_client = discord.utils.get(bot.voice_clients, guild=interaction.guild)
+        voice_channel = interaction.user.voice.channel
+        if voice_client is None:
+            # Kết nối đến kênh thoại nếu chưa có kết nối
+            voice_client = await voice_channel.connect()
 
-            try:
-                await interaction.response.defer()
-                audio_url = f"https://leagueoflegends.fandom.com/wiki/{champion}/LoL/Audio"
-                response = requests.get(audio_url)
-                soup = BeautifulSoup(response.content, "html.parser")
-                audio_buttons = soup.find_all("audio", class_="ext-audiobutton")
+        try:
+            await interaction.response.defer()
+            audio_url = f"https://leagueoflegends.fandom.com/wiki/{champion}/LoL/Audio"
+            response = requests.get(audio_url)
+            soup = BeautifulSoup(response.content, "html.parser")
+            audio_buttons = soup.find_all("audio", class_="ext-audiobutton")
 
-                if audio_buttons:
-                    audio_links = []
-                    audio_descriptions = []
-                    dialogue_set = set()
+            if audio_buttons:
+                audio_links = []
+                audio_descriptions = []
+                dialogue_set = set()
 
-                    for audio in audio_buttons:
-                        source = audio.find("source")
-                        if source and source.has_attr('src'):
-                            description_tag = audio.find_next("i")
-                            if desc:
-                                description = description_tag.text.strip() if description_tag.text.lower().strip('"').startswith(desc.lower()) else "Không có hội thoại."
-                            else:
-                                description = description_tag.text.strip() if description_tag else "Không có hội thoại."
-                            
-                            # Loại bỏ đoạn thoại trùng lặp
-                            if description not in dialogue_set and description != "Không có hội thoại.":
-                                audio_links.append(source['src'])
-                                audio_descriptions.append(description)
-                                dialogue_set.add(description)
-
-                    if audio_links:
+                for audio in audio_buttons:
+                    source = audio.find("source")
+                    if source and source.has_attr('src'):
+                        description_tag = audio.find_next("i")
                         if desc:
-                            voice_client.play(discord.FFmpegPCMAudio(audio_links[0]))
-                            view = AudioPlayer(audio_links, audio_descriptions, voice_client)
-                            # Gửi message kèm các nút
-                            await interaction.followup.send(
-                                f"Có {len(audio_links)} âm thanh cho champion **{champion}**:{desc}. Chọn nút để phát:",
-                                view=view
-                            )
+                            description = description_tag.text.strip() if description_tag.text.lower().strip('"').startswith(desc.lower()) else "Không có hội thoại."
                         else:
-                            voice_client.play(discord.FFmpegPCMAudio(audio_links[1]))
-                            # Tạo một view chứa các nút phát âm thanh và nút stop
-                            view = AudioPlayer(audio_links, audio_descriptions, voice_client)
-                            # Gửi message kèm các nút
-                            await interaction.followup.send(
-                                f"Có {len(audio_links)} âm thanh cho champion **{champion}**. Chọn nút để phát:",
-                                view=view
-                            )
+                            description = description_tag.text.strip() if description_tag else "Không có hội thoại."
+                        
+                        # Loại bỏ đoạn thoại trùng lặp
+                        if description not in dialogue_set and description != "Không có hội thoại.":
+                            audio_links.append(source['src'])
+                            audio_descriptions.append(description)
+                            dialogue_set.add(description)
+
+                if audio_links:
+                    if desc:
+                        voice_client.play(discord.FFmpegPCMAudio(audio_links[0]))
+                        view = AudioPlayer(audio_links, audio_descriptions, voice_client)
+                        # Gửi message kèm các nút
+                        await interaction.followup.send(
+                            f"Có {len(audio_links)} âm thanh cho champion **{champion}**:{desc}. Chọn nút để phát:",
+                            view=view
+                        )
                     else:
-                        await interaction.followup.send("Không tìm thấy âm thanh cho champion.")
+                        voice_client.play(discord.FFmpegPCMAudio(audio_links[1]))
+                        # Tạo một view chứa các nút phát âm thanh và nút stop
+                        view = AudioPlayer(audio_links, audio_descriptions, voice_client)
+                        # Gửi message kèm các nút
+                        await interaction.followup.send(
+                            f"Có {len(audio_links)} âm thanh cho champion **{champion}**. Chọn nút để phát:",
+                            view=view
+                        )
                 else:
                     await interaction.followup.send("Không tìm thấy âm thanh cho champion.")
-            except Exception as e:
-                print(f"Có lỗi xảy ra khi xử lý lệnh /lol: {str(e)}")
-                await interaction.followup.send("Có lỗi xảy ra trong quá trình xử lý lệnh.")
-        else:
-            await interaction.response.send_message("Bạn cần ở trong một kênh thoại để phát âm thanh.")
+            else:
+                await interaction.followup.send("Không tìm thấy âm thanh cho champion.")
+        except Exception as e:
+            print(f"Có lỗi xảy ra khi xử lý lệnh /lol: {str(e)}")
+            await interaction.followup.send("Có lỗi xảy ra trong quá trình xử lý lệnh.")
+    else:
+        await interaction.response.send_message("Bạn cần ở trong một kênh thoại để phát âm thanh.")

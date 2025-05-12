@@ -5,6 +5,7 @@ from discord import app_commands
 from yt_dlp import YoutubeDL
 from concurrent.futures import ThreadPoolExecutor
 from utils import dc_nextsong, dc_queue, vqib
+from bot import bot
 
 # Cấu hình YoutubeDL
 def get_ydl(query):
@@ -26,12 +27,11 @@ music_queues = {}
 executor = ThreadPoolExecutor()
 vqib_play = vqib.VQIB()
 
-def setup(bot):
-    @bot.tree.command(name="play", description="Play music")
-    @app_commands.describe(query="Enter song name or link")
-    async def play(interaction: discord.Interaction, query: str):
-        await interaction.response.defer()
-        await start(interaction, bot, query)
+@bot.tree.command(name="play", description="Play music")
+@app_commands.describe(query="Enter song name or link")
+async def play(interaction: discord.Interaction, query: str):
+    await interaction.response.defer()
+    await start(interaction, bot, query)
 
 async def start(interaction, bot, query, mess=True):
     vqib_play.interaction = interaction

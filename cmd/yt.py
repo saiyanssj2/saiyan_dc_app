@@ -1,6 +1,7 @@
 import discord
 import yt_dlp
 import asyncio
+from bot import bot
 
 # Thêm các cờ reconnect để giảm thiểu lỗi ngắt nhạc
 ffmpeg_options = {
@@ -152,44 +153,43 @@ class YouTubePlayer(discord.ui.View):
             next_page_button.callback = self.next_page
             self.add_item(next_page_button)
 
-def setup(bot):
-    @bot.tree.command(name="yt", description="Đưa tao cái link zutube")
-    async def yt(interaction: discord.Interaction, link: str):
-        # Kiểm tra user
-        if interaction.user.voice is None:
-            await interaction.response.send_message("Bạn cần ở trong kênh thoại để phát nhạc.")
-            return
-        # Join vào kênh user
-        voice_channel = interaction.user.voice.channel
-        voice_client = discord.utils.get(bot.voice_clients, guild=interaction.guild)
-        if voice_client is None:
-            voice_client = await voice_channel.connect()
+@bot.tree.command(name="yt", description="Đưa tao cái link zutube")
+async def yt(interaction: discord.Interaction, link: str):
+    # Kiểm tra user
+    if interaction.user.voice is None:
+        await interaction.response.send_message("Bạn cần ở trong kênh thoại để phát nhạc.")
+        return
+    # Join vào kênh user
+    voice_channel = interaction.user.voice.channel
+    voice_client = discord.utils.get(bot.voice_clients, guild=interaction.guild)
+    if voice_client is None:
+        voice_client = await voice_channel.connect()
 
-        await interaction.response.defer()
+    await interaction.response.defer()
 
-        async def load_playlist():
-            ytdl_opts = {
-                            "format": "bestaudio/best",
-                            "quiet": True,
-                            "noplaylist": False,
-                            "default_search": "ytsearch",
-                            "extract_flat": "in_playlist"
-                        }
-            with yt_dlp.YoutubeDL(ytdl_opts) as ytdl:
-                data = ytdl.extract_info(link, download=False)
+    async def load_playlist():
+        ytdl_opts = {
+                        "format": "bestaudio/best",
+                        "quiet": True,
+                        "noplaylist": False,
+                        "default_search": "ytsearch",
+                        "extract_flat": "in_playlist"
+                    }
+        with yt_dlp.YoutubeDL(ytdl_opts) as ytdl:
+            data = ytdl.extract_info(link, download=False)
 
-            if "entries" in data:
-                songs = [{"title": entry["title"], "url": entry["url"]} for entry in data["entries"] if entry.get("channel_id")]
-            else:
-                songs = [{"title": data["title"], "url": data["url"]}]
+        if "entries" in data:
+            songs = [{"title": entry["title"], "url": entry["url"]} for entry in data["entries"] if entry.get("channel_id")]
+        else:
+            songs = [{"title": data["title"], "url": data["url"]}]
 
-            if not hasattr(bot, 'current_player_view'):
-                view = YouTubePlayer(songs, voice_client)
-                await view.play_song(0, interaction)
-                bot.current_player_view = view
-            else:
-                bot.current_player_view.songs += songs
-                await bot.current_player_view.send_now_playing(interaction)
+        if not hasattr(bot, 'current_player_view'):
+            view = YouTubePlayer(songs, voice_client)
+            await view.play_song(0, interaction)
+            bot.current_player_view = view
+        else:
+            bot.current_player_view.songs += songs
+            await bot.current_player_view.send_now_playing(interaction)
 
-        # Khởi chạy load_playlist không đồng bộ
-        asyncio.create_task(load_playlist())
+    # Khởi chạy load_playlist không đồng bộ
+    asyncio.create_task(load_playlist())
