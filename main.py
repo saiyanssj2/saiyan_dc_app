@@ -1,16 +1,39 @@
+import discord
 import os
+import asyncio
+from discord.ext import commands
 from dotenv import load_dotenv
-from bot import bot
-from cmd import *
 
 load_dotenv()
-DISCORD_TOKEN = os.getenv('DISCORD_TOKEN')
+
+class SaiyanBot(commands.Bot):
+    def __init__(self):
+        intents = discord.Intents.default()
+        intents.message_content = True
+        super().__init__(command_prefix="!", intents=intents)
+
+    async def setup_hook(self):
+        # Nạp Cog Music
+        await self.load_extension("cogs.music_cog")
+        # Đồng bộ Slash Commands với Discord
+        await self.tree.sync()
+        print("✅ Đã đồng bộ Slash Commands!")
+
+bot = SaiyanBot()
 
 @bot.event
 async def on_ready():
-    print(f'Logged in as {bot.user}')
-    # Đồng bộ global commands
-    await bot.tree.sync()
-    print("Global commands synced!")
+    print(f"---")
+    print(f"Logged in as: {bot.user}")
+    print(f"ID: {bot.user.id}")
+    print(f"---")
 
-bot.run(DISCORD_TOKEN)
+async def main():
+    async with bot:
+        await bot.start(os.getenv("DISCORD_TOKEN"))
+
+if __name__ == "__main__":
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("Bot đang tắt...")
