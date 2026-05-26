@@ -13,9 +13,7 @@ class SaiyanBot(commands.Bot):
         super().__init__(command_prefix="!", intents=intents)
 
     async def setup_hook(self):
-        # Nạp Cog Music
         await self.load_extension("cogs.music_cog")
-        # Đồng bộ Slash Commands với Discord
         await self.tree.sync()
         print("✅ Đã đồng bộ Slash Commands!")
 

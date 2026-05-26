@@ -1,268 +1,328 @@
 import asyncio
 import random
 import discord
-import wavelink
-import os
+import yt_dlp
 from discord import app_commands
 from discord.ext import commands
 
+YDL_OPTS = {
+    'format': 'bestaudio/best',
+    'noplaylist': False,
+    'quiet': True,
+    'no_warnings': True,
+    'default_search': 'ytsearch',
+    'source_address': '0.0.0.0',
+}
+
+FFMPEG_OPTS = {
+    'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
+    'options': '-vn',
+}
+
+
+class Track:
+    def __init__(self, title: str, url: str, stream_url: str, thumbnail: str = None, duration: int = 0):
+        self.title = title
+        self.url = url
+        self.stream_url = stream_url
+        self.thumbnail = thumbnail
+        self.duration = duration
+
+
+class MusicPlayer:
+    """Quản lý state nhạc cho mỗi guild"""
+    def __init__(self):
+        self.queue: list[Track] = []
+        self.history: list[str] = []
+        self.current: Track | None = None
+        self.loop_mode = 0  # 0=off, 1=one, 2=all
+        self.is_shuffled = False
+
+
 class MusicControlView(discord.ui.View):
-	def __init__(self, player: wavelink.Player):
-		super().__init__(timeout=None)
-		self.player = player
-		if not hasattr(self.player, 'history'):
-			self.player.history = []
-		if not hasattr(self.player, 'is_shuffled'): self.player.is_shuffled = False
+    def __init__(self, cog: 'Music', guild_id: int):
+        super().__init__(timeout=None)
+        self.cog = cog
+        self.guild_id = guild_id
 
-	async def update_view(self, interaction: discord.Interaction):
-		print("===========MusicControlView.update_view===========")
-		if not self.player.current:
-			embed = discord.Embed(title="🎶 Hàng chờ trống", color=discord.Color.red())
-			for child in self.children:
-				child.disabled = True
-			return await interaction.response.edit_message(embed=embed, view=self)
+    def get_player(self) -> MusicPlayer:
+        return self.cog.players.get(self.guild_id)
 
-		# 1. Xử lý "Đang phát"
-		current_track = self.player.current
-		embed = discord.Embed(color=discord.Color.green())
-		embed.title = f" đang phát: {current_track.title}"
-		embed.set_thumbnail(url=current_track.artwork)
+    def build_embed(self) -> discord.Embed:
+        player = self.get_player()
+        if not player or not player.current:
+            return discord.Embed(title="🎶 Hàng chờ trống", color=discord.Color.red())
 
-		# 2. Xử lý "Sẽ phát" (Queue) - Lấy tối đa 5 bài tiếp theo
-		upcoming = []
-		# vc.queue là một iterable, chúng ta convert sang list để lấy các phần tử đầu
-		queue_list = list(self.player.queue)
-		for i, track in enumerate(queue_list[:5]):
-			upcoming.append(f"{i+1}. {track.title}")
-		
-		queue_str = "\n".join(upcoming) if upcoming else "Không có bài nào tiếp theo"
+        embed = discord.Embed(color=discord.Color.green())
+        embed.title = f"🎵 Đang phát: {player.current.title}"
+        if player.current.thumbnail:
+            embed.set_thumbnail(url=player.current.thumbnail)
 
-		# 3. Xử lý "Đã phát" (History) - Lấy 3 bài gần nhất
-		history_str = "\n".join(self.player.history[-3:]) if self.player.history else "Chưa có lịch sử"
+        # Queue
+        upcoming = [f"{i+1}. {t.title}" for i, t in enumerate(player.queue[:5])]
+        queue_str = "\n".join(upcoming) if upcoming else "Không có bài nào tiếp theo"
 
-		# Thêm các Field vào Embed
-		embed.add_field(name="⏮️", value=history_str, inline=False)
-		embed.add_field(name="▶️", value=f"[{current_track.title}]({current_track.uri})", inline=False)
-		embed.add_field(name="⏭️", value=queue_str, inline=False)
+        # History
+        history_str = "\n".join(player.history[-3:]) if player.history else "Chưa có lịch sử"
 
-		# 1. Nút Loop
-		loop_modes = {
-			wavelink.QueueMode.normal: ("🔁 Loop: Off", discord.ButtonStyle.gray),
-			wavelink.QueueMode.loop: ("🔂 Loop: One", discord.ButtonStyle.green),
-			wavelink.QueueMode.loop_all: ("🔁 Loop: All", discord.ButtonStyle.blurple),
-		}
-		mode_text, mode_style = loop_modes.get(self.player.queue.mode, ("Loop", discord.ButtonStyle.gray))
-		self.loop_button.label = mode_text
-		self.loop_button.style = mode_style
+        embed.add_field(name="⏮️ Đã phát", value=history_str, inline=False)
+        embed.add_field(name="⏭️ Sắp phát", value=queue_str, inline=False)
 
-		# 2. Nút Shuffle
-		self.shuffle_button.style = discord.ButtonStyle.green if self.player.is_shuffled else discord.ButtonStyle.gray
+        # Update button states
+        loop_labels = {0: "🔁 Loop: Off", 1: "🔂 Loop: One", 2: "🔁 Loop: All"}
+        loop_styles = {0: discord.ButtonStyle.gray, 1: discord.ButtonStyle.green, 2: discord.ButtonStyle.blurple}
+        self.loop_button.label = loop_labels[player.loop_mode]
+        self.loop_button.style = loop_styles[player.loop_mode]
+        self.shuffle_button.style = discord.ButtonStyle.green if player.is_shuffled else discord.ButtonStyle.gray
 
-		# Cập nhật trạng thái nút
-		self.pause_resume.label = "▶️" if self.player.paused else "⏸️"
-		
-		await interaction.response.edit_message(embed=embed, view=self)
+        vc = self.cog.bot.get_guild(self.guild_id).voice_client
+        if vc:
+            self.pause_resume.label = "▶️" if vc.is_paused() else "⏸️"
 
-	@discord.ui.button(label="⏮️", style=discord.ButtonStyle.gray)
-	async def previous(self, interaction: discord.Interaction, button: discord.ui.Button):
-		print("===========MusicControlView.previous===========")
-		if not self.player.history:
-			return await interaction.response.send_message("❌ Không có bài hát trước đó!", ephemeral=True)
-		
-		# Lấy bài cuối cùng trong lịch sử
-		prev_track_title = self.player.history.pop() 
-		# Tìm kiếm và phát lại (Hoặc nếu bạn lưu object Track thì tốt hơn)
-		results = await wavelink.Playable.search(prev_track_title)
-		if results:
-			track = results[0]
-			# Đưa bài hiện tại ngược lại vào hàng chờ nếu muốn
-			await self.player.play(track)
-			await self.update_view(interaction)
+        return embed
 
-	@discord.ui.button(label="⏸️", style=discord.ButtonStyle.blurple)
-	async def pause_resume(self, interaction: discord.Interaction, button: discord.ui.Button):
-		print("===========MusicControlView.pause_resume===========")
-		await self.player.pause(not self.player.paused)
-		await self.update_view(interaction)
+    @discord.ui.button(label="⏮️", style=discord.ButtonStyle.gray)
+    async def previous(self, interaction: discord.Interaction, button: discord.ui.Button):
+        player = self.get_player()
+        if not player or not player.history:
+            return await interaction.response.send_message("❌ Không có bài trước đó!", ephemeral=True)
 
-	@discord.ui.button(label="⏭️", style=discord.ButtonStyle.gray)
-	async def skip(self, interaction: discord.Interaction, button: discord.ui.Button):
-		print("===========MusicControlView.skip===========")
-		await self.player.skip()
-		# Đợi 1 chút để Wavelink cập nhật trạng thái player.current mới
-		await asyncio.sleep(0.5) 
-		await self.update_view(interaction)
+        prev_title = player.history.pop()
+        track = await self.cog.search_track(prev_title)
+        if track:
+            vc = interaction.guild.voice_client
+            if vc:
+                player.current = track
+                vc.stop()
+                await asyncio.sleep(0.3)
+                vc.play(discord.FFmpegPCMAudio(track.stream_url, **FFMPEG_OPTS),
+                        after=lambda e: self.cog.play_next(interaction.guild))
+        await interaction.response.edit_message(embed=self.build_embed(), view=self)
 
-	@discord.ui.button(label="🔀 Shuffle", style=discord.ButtonStyle.gray)
-	async def shuffle_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-		print("===========MusicControlView.shuffle_button===========")
-		self.player.is_shuffled = not self.player.is_shuffled
-		if self.player.is_shuffled:
-			random.shuffle(self.player.queue._queue) # Trộn hàng chờ
-		await self.update_view(interaction)
-	
-	@discord.ui.button(label="🔁 Loop: Off", style=discord.ButtonStyle.gray)
-	async def loop_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-		print("===========MusicControlView.loop_button===========")
-		# Xoay vòng chế độ: Off -> One -> All -> Off
-		if self.player.queue.mode == wavelink.QueueMode.normal:
-			self.player.queue.mode = wavelink.QueueMode.loop
-		elif self.player.queue.mode == wavelink.QueueMode.loop:
-			self.player.queue.mode = wavelink.QueueMode.loop_all
-		else:
-			self.player.queue.mode = wavelink.QueueMode.normal
-		
-		await self.update_view(interaction)
+    @discord.ui.button(label="⏸️", style=discord.ButtonStyle.blurple)
+    async def pause_resume(self, interaction: discord.Interaction, button: discord.ui.Button):
+        vc = interaction.guild.voice_client
+        if vc:
+            if vc.is_paused():
+                vc.resume()
+            else:
+                vc.pause()
+        await interaction.response.edit_message(embed=self.build_embed(), view=self)
 
-	@discord.ui.button(label="⏹️", style=discord.ButtonStyle.red)
-	async def stop(self, interaction: discord.Interaction, button: discord.ui.button):
-		print("===========MusicControlView.stop===========")
-		try:
-			# 1. Phản hồi ngay lập tức để Discord không báo lỗi timeout
-			await interaction.response.defer(ephemeral=True) 
-			
-			# 2. Thực hiện dừng nhạc và ngắt kết nối
-			if self.player:
-				self.player.queue.clear() # Xóa hàng chờ
-				await self.player.disconnect() # Ngắt kết nối voice
-			
-			# 3. Cập nhật lại tin nhắn gốc (Xóa các nút bấm để tránh bấm nhầm lần nữa)
-			embed = discord.Embed(
-				title="⏹️ Đã dừng nhạc", 
-				description="Bot đã ngắt kết nối và xóa hàng chờ.", 
-				color=discord.Color.red()
-			)
-			await interaction.edit_original_response(embed=embed, view=None)
-			
-		except Exception as e:
-			print(f"Lỗi khi nhấn Stop: {e}")
-			# Nếu có lỗi, thông báo cho người dùng qua followup vì đã defer ở trên
-			await interaction.followup.send("❌ Có lỗi khi cố gắng dừng nhạc!", ephemeral=True)
+    @discord.ui.button(label="⏭️", style=discord.ButtonStyle.gray)
+    async def skip(self, interaction: discord.Interaction, button: discord.ui.Button):
+        vc = interaction.guild.voice_client
+        if vc and vc.is_playing():
+            vc.stop()
+        await asyncio.sleep(0.5)
+        await interaction.response.edit_message(embed=self.build_embed(), view=self)
+
+    @discord.ui.button(label="🔀 Shuffle", style=discord.ButtonStyle.gray)
+    async def shuffle_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        player = self.get_player()
+        if player:
+            player.is_shuffled = not player.is_shuffled
+            if player.is_shuffled:
+                random.shuffle(player.queue)
+        await interaction.response.edit_message(embed=self.build_embed(), view=self)
+
+    @discord.ui.button(label="🔁 Loop: Off", style=discord.ButtonStyle.gray)
+    async def loop_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        player = self.get_player()
+        if player:
+            player.loop_mode = (player.loop_mode + 1) % 3
+        await interaction.response.edit_message(embed=self.build_embed(), view=self)
+
+    @discord.ui.button(label="⏹️", style=discord.ButtonStyle.red)
+    async def stop(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer(ephemeral=True)
+        player = self.get_player()
+        if player:
+            player.queue.clear()
+            player.current = None
+        vc = interaction.guild.voice_client
+        if vc:
+            vc.stop()
+            await vc.disconnect()
+        embed = discord.Embed(title="⏹️ Đã dừng nhạc", description="Bot đã ngắt kết nối.", color=discord.Color.red())
+        await interaction.edit_original_response(embed=embed, view=None)
+
 
 class Music(commands.Cog):
-	def __init__(self, bot):
-		self.bot = bot
-		# Tạo task để kết nối Lavalink ngay khi Cog được nạp
-		bot.loop.create_task(self.connect_nodes())
+    def __init__(self, bot):
+        self.bot = bot
+        self.players: dict[int, MusicPlayer] = {}
 
-	async def connect_nodes(self):
-		"""Kết nối tới Lavalink bằng thông số từ file .env"""
-		print("===========Music.connect_nodes===========")
-		await self.bot.wait_until_ready() # Đợi bot sẵn sàng mới kết nối node
+    def get_player(self, guild_id: int) -> MusicPlayer:
+        if guild_id not in self.players:
+            self.players[guild_id] = MusicPlayer()
+        return self.players[guild_id]
 
-		# Lấy thông tin từ file .env
-		host = os.getenv("LAVALINK_HOST", "127.0.0.1")
-		port = int(os.getenv("LAVALINK_PORT", 2333))
-		password = os.getenv("LAVALINK_PASSWORD", "youshallnotpass")
-		
-		# Cấu hình Node (Sử dụng URI định dạng: http://host:port)
-		node = wavelink.Node(
-			uri=f"http://{host}:{port}", 
-			password=password,
-		)
-		
-		try:
-			await wavelink.Pool.connect(nodes=[node], client=self.bot)
-			print(f"📡 Đã gửi yêu cầu kết nối tới Lavalink tại {host}:{port}")
-		except Exception as e:
-			print(f"❌ Lỗi kết nối Lavalink: {e}")
+    async def search_track(self, query: str) -> Track | None:
+        loop = asyncio.get_event_loop()
+        with yt_dlp.YoutubeDL(YDL_OPTS) as ydl:
+            data = await loop.run_in_executor(None, lambda: ydl.extract_info(query, download=False))
 
-	@commands.Cog.listener()
-	async def on_wavelink_node_ready(self, payload: wavelink.NodeReadyEventPayload):
-		print(f"✅ Lavalink Node {payload.node.identifier} đã sẵn sàng!")
+        if not data:
+            return None
 
-	@commands.Cog.listener()
-	async def on_wavelink_track_end(self, payload: wavelink.TrackEndEventPayload):
-		print("===========Music.on_wavelink_track_end===========")
-		player = payload.player
-		if not player:
-			return
+        # Nếu là playlist, lấy bài đầu
+        if 'entries' in data:
+            entries = list(data['entries'])
+            if not entries:
+                return None
+            data = entries[0]
 
-		# Lưu bài vừa kết thúc vào lịch sử
-		if not hasattr(player, 'history'):
-			player.history = []
-		player.history.append(payload.track.title)
+        return Track(
+            title=data.get('title', 'Unknown'),
+            url=data.get('webpage_url', ''),
+            stream_url=data.get('url', ''),
+            thumbnail=data.get('thumbnail'),
+            duration=data.get('duration', 0),
+        )
 
-		# Giới hạn lịch sử chỉ giữ 10 bài cho đỡ tốn RAM
-		if len(player.history) > 10:
-			player.history.pop(0)
+    async def search_tracks(self, query: str) -> list[Track]:
+        """Tìm nhiều bài (playlist support)"""
+        loop = asyncio.get_event_loop()
+        with yt_dlp.YoutubeDL(YDL_OPTS) as ydl:
+            data = await loop.run_in_executor(None, lambda: ydl.extract_info(query, download=False))
 
-		# Nếu còn bài trong hàng chờ, phát bài tiếp theo
-		if not player.queue.is_empty:
-			next_track = player.queue.get()
-			await player.play(next_track)
-			# Lưu ý: Bạn có thể lưu trữ tin nhắn giao diện vào biến để update tại đây
-		else:
-			# Nếu hết bài, có thể gửi thông báo hoặc để im (View sẽ tự update khi người dùng bấm nút)
-			print("Hàng chờ đã hết.")
+        if not data:
+            return []
 
-	@app_commands.command(name="play", description="Phát nhạc từ YouTube, Spotify hoặc URL")
-	async def play(self, interaction: discord.Interaction, search: str):
-		print("===========Music.play===========")
-		await interaction.response.defer()
-		try:
-			if not interaction.user.voice:
-				return await interaction.followup.send("❌ Bạn cần vào Voice Channel trước!")
+        tracks = []
+        if 'entries' in data:
+            for entry in data['entries']:
+                if entry:
+                    tracks.append(Track(
+                        title=entry.get('title', 'Unknown'),
+                        url=entry.get('webpage_url', ''),
+                        stream_url=entry.get('url', ''),
+                        thumbnail=entry.get('thumbnail'),
+                        duration=entry.get('duration', 0),
+                    ))
+        else:
+            tracks.append(Track(
+                title=data.get('title', 'Unknown'),
+                url=data.get('webpage_url', ''),
+                stream_url=data.get('url', ''),
+                thumbnail=data.get('thumbnail'),
+                duration=data.get('duration', 0),
+            ))
+        return tracks
 
-			vc: wavelink.Player = interaction.guild.voice_client or \
-								await interaction.user.voice.channel.connect(cls=wavelink.Player)
+    def play_next(self, guild: discord.Guild):
+        """Callback khi bài hát kết thúc - phát bài tiếp theo"""
+        player = self.get_player(guild.id)
+        vc = guild.voice_client
 
-			# Tìm kiếm bài hát/playlist
-			results = await wavelink.Playable.search(search)
-			if not results:
-				return await interaction.followup.send("❌ Không tìm thấy kết quả nào!")
+        if not vc:
+            return
 
-			# KIỂM TRA NẾU LÀ PLAYLIST
-			if isinstance(results, wavelink.Playlist):
-				# Thêm toàn bộ bài hát trong playlist vào hàng chờ
-				added = await vc.queue.put_wait(results)
-				display_name = f"Playlist: {results.name} ({added} bài)"
-				track_for_embed = results.tracks[0] # Lấy bài đầu để hiện thumbnail
-			else:
-				# Nếu là bài đơn lẻ
-				track = results[0]
-				await vc.queue.put_wait(track)
-				display_name = track.title
-				track_for_embed = track
+        # Lưu history
+        if player.current:
+            player.history.append(player.current.title)
+            if len(player.history) > 10:
+                player.history.pop(0)
 
-			# Nếu bot chưa phát nhạc thì bắt đầu phát bài đầu tiên trong hàng chờ
-			if not vc.playing:
-				await vc.play(vc.queue.get())
+        # Loop one
+        if player.loop_mode == 1 and player.current:
+            vc.play(discord.FFmpegPCMAudio(player.current.stream_url, **FFMPEG_OPTS),
+                    after=lambda e: self.play_next(guild))
+            return
 
-			# Giao diện thông báo
-			embed = discord.Embed(
-				title="🎶 Đã thêm vào hàng chờ",
-				description=f"**{display_name}**",
-				color=discord.Color.green()
-			)
-			if hasattr(track_for_embed, 'artwork'):
-				embed.set_thumbnail(url=track_for_embed.artwork)
-			
-			await interaction.followup.send(embed=embed, view=MusicControlView(vc))
+        # Loop all - đưa bài vừa phát về cuối queue
+        if player.loop_mode == 2 and player.current:
+            player.queue.append(player.current)
 
-		except Exception as e:
-			print(f"🔴 LỖI TẠI LỆNH PLAY: {e}")
-			await interaction.followup.send(f"Có lỗi xảy ra: {e}")
+        # Phát bài tiếp
+        if player.queue:
+            next_track = player.queue.pop(0)
+            player.current = next_track
+            vc.play(discord.FFmpegPCMAudio(next_track.stream_url, **FFMPEG_OPTS),
+                    after=lambda e: self.play_next(guild))
+        else:
+            player.current = None
 
-	@app_commands.command(name="local", description="Phát nhạc từ thư mục local_musics trên server")
-	async def local(self, interaction: discord.Interaction, filename: str):
-		print("===========Music.local===========")
-		"""Cách 2: Quét thư mục trên Server"""
-		path = f"./local_musics/{filename}"
-		if not os.path.exists(path):
-			return await interaction.response.send_message(f"❌ Không tìm thấy file `{filename}` trong thư mục local_musics!")
+    @app_commands.command(name="play", description="Phát nhạc từ YouTube hoặc URL")
+    async def play(self, interaction: discord.Interaction, search: str):
+        await interaction.response.defer()
 
-		# Lavalink hỗ trợ phát file local nếu đã bật 'local: true' trong application.yml
-		await self.play(interaction, path)
+        if not interaction.user.voice:
+            return await interaction.followup.send("❌ Bạn cần vào Voice Channel trước!")
 
-	@app_commands.command(name="upload", description="Phát file nhạc bạn gửi lên")
-	async def upload(self, interaction: discord.Interaction, file: discord.Attachment):
-		print("===========Music.upload===========")
-		"""Cách 1: User upload file trực tiếp"""
-		if not file.content_type or "audio" not in file.content_type:
-			return await interaction.response.send_message("❌ Vui lòng gửi một file âm thanh!")
-		
-		await self.play(interaction, file.url)
+        vc = interaction.guild.voice_client
+        if not vc:
+            vc = await interaction.user.voice.channel.connect()
+
+        player = self.get_player(interaction.guild.id)
+        tracks = await self.search_tracks(search)
+
+        if not tracks:
+            return await interaction.followup.send("❌ Không tìm thấy kết quả!")
+
+        # Thêm vào queue
+        for t in tracks:
+            player.queue.append(t)
+
+        display_name = tracks[0].title if len(tracks) == 1 else f"Playlist ({len(tracks)} bài)"
+
+        # Nếu chưa phát thì bắt đầu
+        if not vc.is_playing() and not vc.is_paused():
+            next_track = player.queue.pop(0)
+            player.current = next_track
+            vc.play(discord.FFmpegPCMAudio(next_track.stream_url, **FFMPEG_OPTS),
+                    after=lambda e: self.play_next(interaction.guild))
+
+        embed = discord.Embed(
+            title="🎶 Đã thêm vào hàng chờ",
+            description=f"**{display_name}**",
+            color=discord.Color.green()
+        )
+        if tracks[0].thumbnail:
+            embed.set_thumbnail(url=tracks[0].thumbnail)
+
+        view = MusicControlView(self, interaction.guild.id)
+        await interaction.followup.send(embed=embed, view=view)
+
+    @app_commands.command(name="skip", description="Bỏ qua bài hiện tại")
+    async def skip(self, interaction: discord.Interaction):
+        vc = interaction.guild.voice_client
+        if vc and vc.is_playing():
+            vc.stop()
+            await interaction.response.send_message("⏭️ Đã skip!")
+        else:
+            await interaction.response.send_message("❌ Không có bài nào đang phát!", ephemeral=True)
+
+    @app_commands.command(name="queue", description="Xem hàng chờ")
+    async def queue(self, interaction: discord.Interaction):
+        player = self.get_player(interaction.guild.id)
+        if not player.current and not player.queue:
+            return await interaction.response.send_message("❌ Hàng chờ trống!", ephemeral=True)
+
+        embed = discord.Embed(title="📋 Hàng chờ", color=discord.Color.blurple())
+        if player.current:
+            embed.add_field(name="🎵 Đang phát", value=player.current.title, inline=False)
+
+        if player.queue:
+            queue_list = "\n".join([f"{i+1}. {t.title}" for i, t in enumerate(player.queue[:10])])
+            if len(player.queue) > 10:
+                queue_list += f"\n... và {len(player.queue) - 10} bài nữa"
+            embed.add_field(name="⏭️ Tiếp theo", value=queue_list, inline=False)
+
+        await interaction.response.send_message(embed=embed)
+
+    @app_commands.command(name="stop", description="Dừng nhạc và ngắt kết nối")
+    async def stop(self, interaction: discord.Interaction):
+        player = self.get_player(interaction.guild.id)
+        player.queue.clear()
+        player.current = None
+        vc = interaction.guild.voice_client
+        if vc:
+            vc.stop()
+            await vc.disconnect()
+        await interaction.response.send_message("⏹️ Đã dừng nhạc!")
+
 
 async def setup(bot):
-	await bot.add_cog(Music(bot))
+    await bot.add_cog(Music(bot))

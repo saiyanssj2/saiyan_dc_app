@@ -1,9 +1,4 @@
-discord.py
-wavelink
+discord.py[voice]
 yt-dlp
 python-dotenv
 PyNaCl
-# lavalink -> download lavalink.jar
-# https://github.com/lavalink-devs/Lavalink/releases
-# java
-# https://adoptium.net/fr/download?link=https%3A%2F%2Fgithub.com%2Fadoptium%2Ftemurin25-binaries%2Freleases%2Fdownload%2Fjdk-25.0.2%252B10%2FOpenJDK25U-jdk_x64_windows_hotspot_25.0.2_10.msi&vendor=Adoptium
