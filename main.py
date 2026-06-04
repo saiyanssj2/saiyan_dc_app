@@ -1,8 +1,12 @@
 import discord
 import os
+import sys
 import asyncio
 from discord.ext import commands
 from dotenv import load_dotenv
+
+sys.stdout.reconfigure(encoding='utf-8')
+sys.stderr.reconfigure(encoding='utf-8')
 
 load_dotenv()
 
@@ -13,9 +17,19 @@ class SaiyanBot(commands.Bot):
         super().__init__(command_prefix="!", intents=intents)
 
     async def setup_hook(self):
+        print("[setup] loading music_cog...")
         await self.load_extension("cogs.music_cog")
-        await self.tree.sync()
-        print("✅ Đã đồng bộ Slash Commands!")
+        print("[setup] loading local_cog...")
+        await self.load_extension("cogs.local_cog")
+        print("[setup] loading search_cog...")
+        await self.load_extension("cogs.search_cog")
+        print("[setup] loading spotify_cog...")
+        await self.load_extension("cogs.spotify_cog")
+        print("[setup] loading lol_cog...")
+        await self.load_extension("cogs.lol_cog")
+        print("[setup] syncing commands...")
+        synced = await self.tree.sync()
+        print(f"✅ Đã đồng bộ {len(synced)} Slash Commands: {[c.name for c in synced]}")
 
 bot = SaiyanBot()
 

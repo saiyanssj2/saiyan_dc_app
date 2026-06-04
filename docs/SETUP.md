@@ -2,7 +2,7 @@
 
 ## Setup local
 
-1. Cài FFmpeg: https://ffmpeg.org/download.html (thêm vào PATH)
+1. Cài FFmpeg: https://ffmpeg.org/download.html (thêm vào PATH) -> https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip
 2. Tạo file `.env`:
    ```
    DISCORD_TOKEN=<your_token>

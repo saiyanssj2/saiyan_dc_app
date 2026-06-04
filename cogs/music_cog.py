@@ -1,155 +1,21 @@
 import asyncio
-import random
 import discord
 import yt_dlp
 from discord import app_commands
 from discord.ext import commands
 
-YDL_OPTS = {
-    'format': 'bestaudio/best',
-    'noplaylist': False,
-    'quiet': True,
-    'no_warnings': True,
-    'default_search': 'ytsearch',
-    'source_address': '0.0.0.0',
-}
-
-FFMPEG_OPTS = {
-    'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
-    'options': '-vn',
-}
+from .music_core import (
+    Track, MusicPlayer,
+    YDL_OPTS_URL, YDL_OPTS_SINGLE,
+    get_user_playlists, playlist_to_tracks,
+    load_favorites,
+)
+from .music_ui import build_embed, SelectTrackView, PlaylistSelectView
+from .music_player import MusicPlayerMixin
 
 
-class Track:
-    def __init__(self, title: str, url: str, stream_url: str, thumbnail: str = None, duration: int = 0):
-        self.title = title
-        self.url = url
-        self.stream_url = stream_url
-        self.thumbnail = thumbnail
-        self.duration = duration
-
-
-class MusicPlayer:
-    """Quản lý state nhạc cho mỗi guild"""
-    def __init__(self):
-        self.queue: list[Track] = []
-        self.history: list[str] = []
-        self.current: Track | None = None
-        self.loop_mode = 0  # 0=off, 1=one, 2=all
-        self.is_shuffled = False
-
-
-class MusicControlView(discord.ui.View):
-    def __init__(self, cog: 'Music', guild_id: int):
-        super().__init__(timeout=None)
-        self.cog = cog
-        self.guild_id = guild_id
-
-    def get_player(self) -> MusicPlayer:
-        return self.cog.players.get(self.guild_id)
-
-    def build_embed(self) -> discord.Embed:
-        player = self.get_player()
-        if not player or not player.current:
-            return discord.Embed(title="🎶 Hàng chờ trống", color=discord.Color.red())
-
-        embed = discord.Embed(color=discord.Color.green())
-        embed.title = f"🎵 Đang phát: {player.current.title}"
-        if player.current.thumbnail:
-            embed.set_thumbnail(url=player.current.thumbnail)
-
-        # Queue
-        upcoming = [f"{i+1}. {t.title}" for i, t in enumerate(player.queue[:5])]
-        queue_str = "\n".join(upcoming) if upcoming else "Không có bài nào tiếp theo"
-
-        # History
-        history_str = "\n".join(player.history[-3:]) if player.history else "Chưa có lịch sử"
-
-        embed.add_field(name="⏮️ Đã phát", value=history_str, inline=False)
-        embed.add_field(name="⏭️ Sắp phát", value=queue_str, inline=False)
-
-        # Update button states
-        loop_labels = {0: "🔁 Loop: Off", 1: "🔂 Loop: One", 2: "🔁 Loop: All"}
-        loop_styles = {0: discord.ButtonStyle.gray, 1: discord.ButtonStyle.green, 2: discord.ButtonStyle.blurple}
-        self.loop_button.label = loop_labels[player.loop_mode]
-        self.loop_button.style = loop_styles[player.loop_mode]
-        self.shuffle_button.style = discord.ButtonStyle.green if player.is_shuffled else discord.ButtonStyle.gray
-
-        vc = self.cog.bot.get_guild(self.guild_id).voice_client
-        if vc:
-            self.pause_resume.label = "▶️" if vc.is_paused() else "⏸️"
-
-        return embed
-
-    @discord.ui.button(label="⏮️", style=discord.ButtonStyle.gray)
-    async def previous(self, interaction: discord.Interaction, button: discord.ui.Button):
-        player = self.get_player()
-        if not player or not player.history:
-            return await interaction.response.send_message("❌ Không có bài trước đó!", ephemeral=True)
-
-        prev_title = player.history.pop()
-        track = await self.cog.search_track(prev_title)
-        if track:
-            vc = interaction.guild.voice_client
-            if vc:
-                player.current = track
-                vc.stop()
-                await asyncio.sleep(0.3)
-                vc.play(discord.FFmpegPCMAudio(track.stream_url, **FFMPEG_OPTS),
-                        after=lambda e: self.cog.play_next(interaction.guild))
-        await interaction.response.edit_message(embed=self.build_embed(), view=self)
-
-    @discord.ui.button(label="⏸️", style=discord.ButtonStyle.blurple)
-    async def pause_resume(self, interaction: discord.Interaction, button: discord.ui.Button):
-        vc = interaction.guild.voice_client
-        if vc:
-            if vc.is_paused():
-                vc.resume()
-            else:
-                vc.pause()
-        await interaction.response.edit_message(embed=self.build_embed(), view=self)
-
-    @discord.ui.button(label="⏭️", style=discord.ButtonStyle.gray)
-    async def skip(self, interaction: discord.Interaction, button: discord.ui.Button):
-        vc = interaction.guild.voice_client
-        if vc and vc.is_playing():
-            vc.stop()
-        await asyncio.sleep(0.5)
-        await interaction.response.edit_message(embed=self.build_embed(), view=self)
-
-    @discord.ui.button(label="🔀 Shuffle", style=discord.ButtonStyle.gray)
-    async def shuffle_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        player = self.get_player()
-        if player:
-            player.is_shuffled = not player.is_shuffled
-            if player.is_shuffled:
-                random.shuffle(player.queue)
-        await interaction.response.edit_message(embed=self.build_embed(), view=self)
-
-    @discord.ui.button(label="🔁 Loop: Off", style=discord.ButtonStyle.gray)
-    async def loop_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        player = self.get_player()
-        if player:
-            player.loop_mode = (player.loop_mode + 1) % 3
-        await interaction.response.edit_message(embed=self.build_embed(), view=self)
-
-    @discord.ui.button(label="⏹️", style=discord.ButtonStyle.red)
-    async def stop(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.defer(ephemeral=True)
-        player = self.get_player()
-        if player:
-            player.queue.clear()
-            player.current = None
-        vc = interaction.guild.voice_client
-        if vc:
-            vc.stop()
-            await vc.disconnect()
-        embed = discord.Embed(title="⏹️ Đã dừng nhạc", description="Bot đã ngắt kết nối.", color=discord.Color.red())
-        await interaction.edit_original_response(embed=embed, view=None)
-
-
-class Music(commands.Cog):
-    def __init__(self, bot):
+class MusicCog(MusicPlayerMixin, commands.Cog):
+    def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.players: dict[int, MusicPlayer] = {}
 
@@ -158,171 +24,288 @@ class Music(commands.Cog):
             self.players[guild_id] = MusicPlayer()
         return self.players[guild_id]
 
-    async def search_track(self, query: str) -> Track | None:
-        loop = asyncio.get_event_loop()
-        with yt_dlp.YoutubeDL(YDL_OPTS) as ydl:
-            data = await loop.run_in_executor(None, lambda: ydl.extract_info(query, download=False))
+    def remove_player(self, guild_id: int):
+        self.players.pop(guild_id, None)
 
-        if not data:
-            return None
+    # ─── Slash Commands ──────────────────────────────────────────────────────
 
-        # Nếu là playlist, lấy bài đầu
-        if 'entries' in data:
-            entries = list(data['entries'])
-            if not entries:
-                return None
-            data = entries[0]
-
-        return Track(
-            title=data.get('title', 'Unknown'),
-            url=data.get('webpage_url', ''),
-            stream_url=data.get('url', ''),
-            thumbnail=data.get('thumbnail'),
-            duration=data.get('duration', 0),
-        )
-
-    async def search_tracks(self, query: str) -> list[Track]:
-        """Tìm nhiều bài (playlist support)"""
-        loop = asyncio.get_event_loop()
-        with yt_dlp.YoutubeDL(YDL_OPTS) as ydl:
-            data = await loop.run_in_executor(None, lambda: ydl.extract_info(query, download=False))
-
-        if not data:
-            return []
-
-        tracks = []
-        if 'entries' in data:
-            for entry in data['entries']:
-                if entry:
-                    tracks.append(Track(
-                        title=entry.get('title', 'Unknown'),
-                        url=entry.get('webpage_url', ''),
-                        stream_url=entry.get('url', ''),
-                        thumbnail=entry.get('thumbnail'),
-                        duration=entry.get('duration', 0),
-                    ))
-        else:
-            tracks.append(Track(
-                title=data.get('title', 'Unknown'),
-                url=data.get('webpage_url', ''),
-                stream_url=data.get('url', ''),
-                thumbnail=data.get('thumbnail'),
-                duration=data.get('duration', 0),
-            ))
-        return tracks
-
-    def play_next(self, guild: discord.Guild):
-        """Callback khi bài hát kết thúc - phát bài tiếp theo"""
-        player = self.get_player(guild.id)
-        vc = guild.voice_client
-
-        if not vc:
+    @app_commands.command(name="play", description="Phát nhạc từ YouTube (từ khóa hoặc URL)")
+    @app_commands.describe(query="Từ khóa tìm kiếm hoặc URL YouTube")
+    async def play(self, interaction: discord.Interaction, query: str):
+        print(f"[play] query={query} | user={interaction.user}")
+        if not interaction.user.voice or not interaction.user.voice.channel:
+            await interaction.response.send_message("❌ Bạn cần vào voice channel trước!", ephemeral=True)
             return
-
-        # Lưu history
-        if player.current:
-            player.history.append(player.current.title)
-            if len(player.history) > 10:
-                player.history.pop(0)
-
-        # Loop one
-        if player.loop_mode == 1 and player.current:
-            vc.play(discord.FFmpegPCMAudio(player.current.stream_url, **FFMPEG_OPTS),
-                    after=lambda e: self.play_next(guild))
-            return
-
-        # Loop all - đưa bài vừa phát về cuối queue
-        if player.loop_mode == 2 and player.current:
-            player.queue.append(player.current)
-
-        # Phát bài tiếp
-        if player.queue:
-            next_track = player.queue.pop(0)
-            player.current = next_track
-            vc.play(discord.FFmpegPCMAudio(next_track.stream_url, **FFMPEG_OPTS),
-                    after=lambda e: self.play_next(guild))
-        else:
-            player.current = None
-
-    @app_commands.command(name="play", description="Phát nhạc từ YouTube hoặc URL")
-    async def play(self, interaction: discord.Interaction, search: str):
-        await interaction.response.defer()
-
-        if not interaction.user.voice:
-            return await interaction.followup.send("❌ Bạn cần vào Voice Channel trước!")
-
+        await interaction.response.defer(ephemeral=True)
         vc = interaction.guild.voice_client
         if not vc:
             vc = await interaction.user.voice.channel.connect()
+        elif vc.channel != interaction.user.voice.channel:
+            await vc.move_to(interaction.user.voice.channel)
+        is_url = query.startswith("http://") or query.startswith("https://")
+        if is_url:
+            await self._handle_url(interaction, vc, query, add_to_front=False)
+        else:
+            await self._handle_search(interaction, vc, query, add_to_front=False)
 
+    @app_commands.command(name="play_next", description="Thêm bài vào đầu hàng chờ")
+    @app_commands.describe(query="Từ khóa tìm kiếm hoặc URL YouTube")
+    async def play_next(self, interaction: discord.Interaction, query: str):
+        if not interaction.user.voice or not interaction.user.voice.channel:
+            await interaction.response.send_message("❌ Bạn cần vào voice channel trước!", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        vc = interaction.guild.voice_client
+        if not vc:
+            vc = await interaction.user.voice.channel.connect()
+        elif vc.channel != interaction.user.voice.channel:
+            await vc.move_to(interaction.user.voice.channel)
+        is_url = query.startswith("http://") or query.startswith("https://")
+        if is_url:
+            await self._handle_url(interaction, vc, query, add_to_front=True)
+        else:
+            await self._handle_search(interaction, vc, query, add_to_front=True)
+
+    @app_commands.command(name="queue", description="Xem hàng chờ hiện tại")
+    async def queue(self, interaction: discord.Interaction):
         player = self.get_player(interaction.guild.id)
-        tracks = await self.search_tracks(search)
-
-        if not tracks:
-            return await interaction.followup.send("❌ Không tìm thấy kết quả!")
-
-        # Thêm vào queue
-        for t in tracks:
-            player.queue.append(t)
-
-        display_name = tracks[0].title if len(tracks) == 1 else f"Playlist ({len(tracks)} bài)"
-
-        # Nếu chưa phát thì bắt đầu
-        if not vc.is_playing() and not vc.is_paused():
-            next_track = player.queue.pop(0)
-            player.current = next_track
-            vc.play(discord.FFmpegPCMAudio(next_track.stream_url, **FFMPEG_OPTS),
-                    after=lambda e: self.play_next(interaction.guild))
-
-        embed = discord.Embed(
-            title="🎶 Đã thêm vào hàng chờ",
-            description=f"**{display_name}**",
-            color=discord.Color.green()
-        )
-        if tracks[0].thumbnail:
-            embed.set_thumbnail(url=tracks[0].thumbnail)
-
-        view = MusicControlView(self, interaction.guild.id)
-        await interaction.followup.send(embed=embed, view=view)
+        if not player.current and not player.queue:
+            await interaction.response.send_message("📋 Hàng chờ trống.", ephemeral=True)
+            return
+        embed = build_embed(player)
+        await interaction.response.send_message(embed=embed, ephemeral=True)
 
     @app_commands.command(name="skip", description="Bỏ qua bài hiện tại")
     async def skip(self, interaction: discord.Interaction):
         vc = interaction.guild.voice_client
-        if vc and vc.is_playing():
-            vc.stop()
-            await interaction.response.send_message("⏭️ Đã skip!")
-        else:
-            await interaction.response.send_message("❌ Không có bài nào đang phát!", ephemeral=True)
-
-    @app_commands.command(name="queue", description="Xem hàng chờ")
-    async def queue(self, interaction: discord.Interaction):
+        if not vc or (not vc.is_playing() and not vc.is_paused()):
+            await interaction.response.send_message("❌ Không có bài nào đang phát.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
         player = self.get_player(interaction.guild.id)
-        if not player.current and not player.queue:
-            return await interaction.response.send_message("❌ Hàng chờ trống!", ephemeral=True)
+        player.footer_msg = ''
+        prev_loop = player.loop_mode
+        if player.loop_mode == 1:
+            player.loop_mode = 0
+        vc.stop()
+        player.loop_mode = prev_loop
+        await interaction.followup.send("⏭️ Đã skip.", ephemeral=True)
 
-        embed = discord.Embed(title="📋 Hàng chờ", color=discord.Color.blurple())
-        if player.current:
-            embed.add_field(name="🎵 Đang phát", value=player.current.title, inline=False)
-
-        if player.queue:
-            queue_list = "\n".join([f"{i+1}. {t.title}" for i, t in enumerate(player.queue[:10])])
-            if len(player.queue) > 10:
-                queue_list += f"\n... và {len(player.queue) - 10} bài nữa"
-            embed.add_field(name="⏭️ Tiếp theo", value=queue_list, inline=False)
-
-        await interaction.response.send_message(embed=embed)
-
-    @app_commands.command(name="stop", description="Dừng nhạc và ngắt kết nối")
+    @app_commands.command(name="stop", description="Dừng nhạc, giữ bot trong channel")
     async def stop(self, interaction: discord.Interaction):
-        player = self.get_player(interaction.guild.id)
-        player.queue.clear()
-        player.current = None
         vc = interaction.guild.voice_client
-        if vc:
+        if not vc:
+            await interaction.response.send_message("❌ Bot chưa ở trong voice channel.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        player = self.get_player(interaction.guild.id)
+        if player.current:
+            player.history.append(player.current)
+            player.current = None
+        player.history.extend(player.queue)
+        player.queue.clear()
+        player.footer_msg = '⏹️ Đã dừng phát nhạc.'
+        if vc.is_playing() or vc.is_paused():
+            player._skip_next_end += 1
             vc.stop()
-            await vc.disconnect()
-        await interaction.response.send_message("⏹️ Đã dừng nhạc!")
+        await self._update_ui(interaction.guild)
+        await interaction.followup.send("⏹️ Đã dừng.", ephemeral=True)
+
+    @app_commands.command(name="disconnect", description="Ngắt kết nối và xóa hàng chờ")
+    async def disconnect(self, interaction: discord.Interaction):
+        await self._quit(interaction)
+
+    @app_commands.command(name="quit", description="Ngắt kết nối và xóa hàng chờ")
+    async def quit(self, interaction: discord.Interaction):
+        await self._quit(interaction)
+
+    @app_commands.command(name="playlist", description="Xem và thêm playlist đã lưu vào queue")
+    async def playlist(self, interaction: discord.Interaction):
+        playlists = get_user_playlists(interaction.user.id)
+        if not playlists:
+            await interaction.response.send_message("📝 Bạn chưa lưu playlist nào.", ephemeral=True)
+            return
+        embed = discord.Embed(title="📜 Playlist đã lưu", color=discord.Color.blurple())
+        options = []
+        for name, data in playlists.items():
+            tracks = playlist_to_tracks(data)
+            display = name if name != '__current__' else '🔄 Current Session'
+            embed.add_field(name=display, value=f"{len(tracks)} bài", inline=False)
+            options.append(discord.SelectOption(label=display, value=name))
+        view = PlaylistSelectView(self, options, interaction)
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
+    @app_commands.command(name="favorite", description="Xem và thêm bài yêu thích vào queue")
+    async def favorite(self, interaction: discord.Interaction):
+        favs = load_favorites()
+        user_favs = favs.get(str(interaction.user.id), [])
+        if not user_favs:
+            await interaction.response.send_message("❤️ Bạn chưa có bài yêu thích nào.", ephemeral=True)
+            return
+        tracks = [Track(
+            title=f['title'], author=f['author'], url=f['url'],
+            stream_url=f.get('stream_url', ''), thumbnail=f.get('thumbnail'),
+            duration=f.get('duration', 0),
+        ) for f in user_favs]
+        embed = discord.Embed(title="❤️ Bài hát yêu thích", color=discord.Color.red())
+        for i, t in enumerate(tracks[:10]):
+            embed.add_field(name=f"{i+1}. {t.title[:50]}", value=f"{t.author} • {t.format_duration()}", inline=False)
+        if len(tracks) > 10:
+            embed.set_footer(text=f"... và {len(tracks) - 10} bài khác")
+        if not interaction.user.voice or not interaction.user.voice.channel:
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+            return
+        vc = interaction.guild.voice_client
+        if not vc:
+            vc = await interaction.user.voice.channel.connect()
+        elif vc.channel != interaction.user.voice.channel:
+            await vc.move_to(interaction.user.voice.channel)
+        view = SelectTrackView(self, tracks, interaction.guild, vc, add_to_front=False)
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+        view.message = await interaction.original_response()
+
+    async def _quit(self, interaction: discord.Interaction):
+        vc = interaction.guild.voice_client
+        if not vc:
+            await interaction.response.send_message("❌ Bot chưa ở trong voice channel.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        self.remove_player(interaction.guild.id)
+        await vc.disconnect()
+        await interaction.followup.send("👋 Đã ngắt kết nối.", ephemeral=True)
+
+    # ─── URL / Search handlers ────────────────────────────────────────────────
+
+    async def _handle_search(self, interaction: discord.Interaction, vc: discord.VoiceClient,
+                              query: str, add_to_front: bool):
+        print(f"[_handle_search] query={query}")
+        tracks = await self.search_tracks(query)
+        print(f"[_handle_search] found {len(tracks)} tracks")
+        if not tracks:
+            await interaction.followup.send("❌ Không tìm thấy kết quả.", ephemeral=True)
+            return
+        view = SelectTrackView(self, tracks, interaction.guild, vc, add_to_front=add_to_front)
+        msg = await interaction.followup.send(
+            content="🔍 Chọn bài hát bạn muốn phát:",
+            view=view, ephemeral=True, wait=True,
+        )
+        view.message = msg
+
+    async def _handle_url(self, interaction: discord.Interaction, vc: discord.VoiceClient,
+                           url: str, add_to_front: bool):
+        player = self.get_player(interaction.guild.id)
+        if "playlist" in url or "list=" in url:
+            await self._handle_playlist(interaction, vc, url, add_to_front)
+            return
+
+        loop = asyncio.get_running_loop()
+        def _fetch():
+            with yt_dlp.YoutubeDL(YDL_OPTS_SINGLE) as ydl:
+                data = ydl.extract_info(url, download=False)
+                return Track.from_ydl(data)
+        track = await loop.run_in_executor(None, _fetch)
+
+        if add_to_front:
+            player.queue.insert(0, track)
+        else:
+            player.queue.append(track)
+
+        embed = discord.Embed(
+            title="✅ Đã thêm vào hàng chờ",
+            description=f"[{track.title}]({track.url})",
+            color=discord.Color.green(),
+        )
+        if track.thumbnail:
+            embed.set_thumbnail(url=track.thumbnail)
+        embed.add_field(name="Tác giả", value=track.author)
+        embed.add_field(name="Thời lượng", value=track.format_duration())
+        await interaction.followup.send(embed=embed, ephemeral=True)
+
+        if not vc.is_playing() and not vc.is_paused() and not player.current:
+            next_track = player.queue.pop(0)
+            await self.play_track(interaction.guild, vc, next_track)
+
+        await self._send_ui(interaction)
+
+    async def _handle_playlist(self, interaction: discord.Interaction, vc: discord.VoiceClient,
+                                url: str, add_to_front: bool):
+        player = self.get_player(interaction.guild.id)
+        loop = asyncio.get_running_loop()
+
+        def _fetch_first():
+            opts = dict(YDL_OPTS_URL)
+            opts['playlistend'] = 1
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                data = ydl.extract_info(url, download=False)
+                entries = data.get('entries', [data])
+                first = entries[0] if entries else None
+                return (
+                    first,
+                    data.get('title', 'Playlist'),
+                    data.get('playlist_count') or len(entries),
+                    data.get('thumbnail'),
+                )
+
+        first_entry, pl_title, pl_count, pl_thumb = await loop.run_in_executor(None, _fetch_first)
+
+        if not first_entry:
+            await interaction.followup.send("❌ Không thể tải playlist.", ephemeral=True)
+            return
+
+        first_track = Track.from_ydl(first_entry)
+
+        embed = discord.Embed(
+            title="✅ Đã thêm playlist vào hàng chờ",
+            description=f"**{pl_title}**",
+            color=discord.Color.green(),
+        )
+        if pl_thumb:
+            embed.set_thumbnail(url=pl_thumb)
+        embed.add_field(name="Số bài", value=str(pl_count))
+        embed.set_footer(text="Đang tải các bài còn lại...")
+        await interaction.followup.send(embed=embed, ephemeral=True)
+
+        if not vc.is_playing() and not vc.is_paused() and not player.current:
+            await self.play_track(interaction.guild, vc, first_track)
+        else:
+            if add_to_front:
+                player.queue.insert(0, first_track)
+            else:
+                player.queue.append(first_track)
+
+        await self._send_ui(interaction)
+        asyncio.create_task(self._load_playlist_background(interaction.guild, url, add_to_front))
+
+    async def _load_playlist_background(self, guild: discord.Guild, url: str, add_to_front: bool):
+        player = self.get_player(guild.id)
+        loop = asyncio.get_running_loop()
+
+        def _fetch_all():
+            with yt_dlp.YoutubeDL(YDL_OPTS_URL) as ydl:
+                data = ydl.extract_info(url, download=False)
+                return data.get('entries', [data])
+
+        try:
+            entries = await loop.run_in_executor(None, _fetch_all)
+            for e in entries[1:]:
+                if not e:
+                    continue
+                track = Track(
+                    title=e.get('title', 'Unknown'),
+                    author=e.get('uploader') or e.get('channel', 'Unknown'),
+                    url=e.get('webpage_url', '') or url,
+                    stream_url=e.get('url', ''),
+                    thumbnail=e.get('thumbnail'),
+                    duration=e.get('duration', 0),
+                )
+                if add_to_front:
+                    player.queue.insert(0, track)
+                else:
+                    player.queue.append(track)
+            await self._update_ui(guild)
+        except Exception as e:
+            print(f"[_load_playlist_background error] {e}")
 
 
-async def setup(bot):
-    await bot.add_cog(Music(bot))
+async def setup(bot: commands.Bot):
+    await bot.add_cog(MusicCog(bot))
