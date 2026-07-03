@@ -235,9 +235,14 @@ class MusicCog(MusicPlayerMixin, commands.Cog):
         def _fetch_first():
             opts = dict(YDL_OPTS_URL)
             opts['playlistend'] = 1
+            opts['ignoreerrors'] = True
             with yt_dlp.YoutubeDL(opts) as ydl:
                 data = ydl.extract_info(url, download=False)
+                if not data:
+                    return (None, 'Playlist', 0, None)
                 entries = data.get('entries', [data])
+                # Lọc bỏ entry None (video unavailable)
+                entries = [e for e in entries if e]
                 first = entries[0] if entries else None
                 return (
                     first,
@@ -281,27 +286,33 @@ class MusicCog(MusicPlayerMixin, commands.Cog):
         loop = asyncio.get_running_loop()
 
         def _fetch_all():
-            with yt_dlp.YoutubeDL(YDL_OPTS_URL) as ydl:
+            opts = dict(YDL_OPTS_URL)
+            opts['ignoreerrors'] = True
+            opts['extract_flat'] = 'in_playlist'
+            with yt_dlp.YoutubeDL(opts) as ydl:
                 data = ydl.extract_info(url, download=False)
                 return data.get('entries', [data])
 
         try:
             entries = await loop.run_in_executor(None, _fetch_all)
+            added = 0
             for e in entries[1:]:
                 if not e:
                     continue
                 track = Track(
                     title=e.get('title', 'Unknown'),
                     author=e.get('uploader') or e.get('channel', 'Unknown'),
-                    url=e.get('webpage_url', '') or url,
-                    stream_url=e.get('url', ''),
-                    thumbnail=e.get('thumbnail'),
-                    duration=e.get('duration', 0),
+                    url=e.get('webpage_url') or e.get('url') or url,
+                    stream_url='',  # sẽ resolve khi phát
+                    thumbnail=e.get('thumbnail') or e.get('thumbnails', [{}])[0].get('url') if e.get('thumbnails') else None,
+                    duration=e.get('duration', 0) or 0,
                 )
                 if add_to_front:
                     player.queue.insert(0, track)
                 else:
                     player.queue.append(track)
+                added += 1
+            print(f"[_load_playlist_background] Đã thêm {added}/{len(entries)-1} bài từ playlist")
             await self._update_ui(guild)
         except Exception as e:
             print(f"[_load_playlist_background error] {e}")

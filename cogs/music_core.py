@@ -33,6 +33,7 @@ YDL_OPTS_URL = {
     'no_warnings': True,
     'source_address': '0.0.0.0',
     'noplaylist': False,
+    'ignoreerrors': True,
     **_COOKIES_OPTS,
 }
 
