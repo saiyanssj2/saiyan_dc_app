@@ -1,4 +1,5 @@
 import discord
+from .logger import logger
 from .music_core import Track, MusicPlayer, fmt_time, get_user_playlists, playlist_to_tracks
 
 
@@ -80,12 +81,14 @@ class TrackSelect(discord.ui.Select):
 
 class SelectTrackView(discord.ui.View):
     def __init__(self, cog, tracks: list[Track], guild: discord.Guild,
-                 voice_client: discord.VoiceClient, add_to_front: bool = False):
+                 voice_client: discord.VoiceClient, add_to_front: bool = False,
+                 auto_play: bool = False):
         super().__init__(timeout=60)
         self.cog = cog
         self.guild = guild
         self.voice_client = voice_client
         self.add_to_front = add_to_front
+        self.auto_play = auto_play
         self.message: discord.Message | None = None
         self.add_item(TrackSelect(tracks))
 
@@ -102,12 +105,20 @@ class SelectTrackView(discord.ui.View):
         self.stop()
 
         player = self.cog.get_player(self.guild.id)
+        logger.info(f"[on_select] selected={len(selected)} | auto_play={self.auto_play} | add_to_front={self.add_to_front}")
+        logger.info(f"[on_select] current={'playing' if player.current else 'none'} | queue={len(player.queue)} | history={len(player.history)}")
 
-        if self.add_to_front:
+        # auto_play: luôn thêm vào đầu queue để phát ngay
+        if self.auto_play:
+            for track in reversed(selected):
+                player.queue.insert(0, track)
+        elif self.add_to_front:
             for track in reversed(selected):
                 player.queue.insert(0, track)
         else:
             player.queue.extend(selected)
+        
+        logger.info(f"[on_select] after insert: queue={len(player.queue)} | history={len(player.history)}")
 
         if len(selected) == 1:
             t = selected[0]
@@ -131,24 +142,27 @@ class SelectTrackView(discord.ui.View):
                 embed.set_footer(text=f"... và {len(selected) - 5} bài khác")
 
         await interaction.followup.send(embed=embed, ephemeral=True)
-        print(f"[on_select] sent followup embed")
+        logger.info(f"[on_select] sent followup embed")
 
         try:
             await self.message.delete()
-            print(f"[on_select] deleted message")
+            logger.info(f"[on_select] deleted message")
         except Exception as e:
-            print(f"[on_select] delete error: {e}")
-
-        # Gửi UI trước, play sau để tránh timeout interaction
-        await self.cog._send_ui(interaction)
-        print(f"[on_select] sent UI")
+            logger.info(f"[on_select] delete error: {e}")
 
         if not self.voice_client.is_playing() and not self.voice_client.is_paused() and not player.current:
+            # Không có gì đang phát → phát ngay bài đầu queue
             next_track = player.queue.pop(0)
-            print(f"[on_select] calling play_track: {next_track.title}")
+            logger.info(f"[on_select] calling play_track: {next_track.title}")
             await self.cog.play_track(self.guild, self.voice_client, next_track)
-            print(f"[on_select] play_track done")
-            await self.cog._update_ui(self.guild)
+            logger.info(f"[on_select] play_track done")
+        elif self.auto_play and player.current:
+            # Đang phát nhưng auto_play → bài favorite đã ở đầu queue, phát tiếp sau bài hiện tại
+            pass
+
+        # Gửi UI sau khi play_track để current đã được set
+        await self.cog._send_ui(interaction)
+        logger.info(f"[on_select] sent UI")
 
 
 # ─── Playlist Select View ─────────────────────────────────────────────────────

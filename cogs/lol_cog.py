@@ -5,6 +5,7 @@ from bs4 import BeautifulSoup
 from discord import app_commands
 from discord.ext import commands
 
+from .logger import logger
 from .music_core import Track
 
 DDRAGON_VERSIONS = "https://ddragon.leagueoflegends.com/api/versions.json"
@@ -204,7 +205,7 @@ class LolCog(commands.Cog):
             await vc.move_to(interaction.user.voice.channel)
 
         champions = await _fetch_champions()
-        print(f"[lol] champions loaded: {len(champions)}")
+        logger.info(f"[lol] champions loaded: {len(champions)}")
         champion_id = champions.get(champion)
         if not champion_id:
             lower = champion.lower()
@@ -218,7 +219,7 @@ class LolCog(commands.Cog):
 
         try:
             audios = await _scrape_audio(champion_id)
-            print(f"[lol] {champion} → {len(audios)} audios")
+            logger.info(f"[lol] {champion} → {len(audios)} audios")
         except Exception as e:
             await interaction.followup.send(f"❌ Không thể tải danh sách âm thanh: `{e}`", ephemeral=True)
             return

@@ -4,6 +4,7 @@ import yt_dlp
 from discord import app_commands
 from discord.ext import commands
 
+from .logger import logger
 from .music_core import (
     Track, MusicPlayer,
     YDL_OPTS_URL, YDL_OPTS_SINGLE,
@@ -32,7 +33,7 @@ class MusicCog(MusicPlayerMixin, commands.Cog):
     @app_commands.command(name="play", description="Phát nhạc từ YouTube (từ khóa hoặc URL)")
     @app_commands.describe(query="Từ khóa tìm kiếm hoặc URL YouTube")
     async def play(self, interaction: discord.Interaction, query: str):
-        print(f"[play] query={query} | user={interaction.user}")
+        logger.info(f"[play] query={query} | user={interaction.user}")
         if not interaction.user.voice or not interaction.user.voice.channel:
             await interaction.response.send_message("❌ Bạn cần vào voice channel trước!", ephemeral=True)
             return
@@ -44,6 +45,14 @@ class MusicCog(MusicPlayerMixin, commands.Cog):
             await vc.move_to(interaction.user.voice.channel)
         is_url = query.startswith("http://") or query.startswith("https://")
         if is_url:
+            # Link Spotify → thông báo dùng /spotify hoặc /play với keyword
+            if 'spotify.com' in query or 'spotify:' in query:
+                await interaction.followup.send(
+                    "⚠️ **Link Spotify không hỗ trợ trực tiếp.**\n"
+                    "Hãy dùng `/play` với tên bài hát hoặc link YouTube.",
+                    ephemeral=True,
+                )
+                return
             await self._handle_url(interaction, vc, query, add_to_front=False)
         else:
             await self._handle_search(interaction, vc, query, add_to_front=False)
@@ -62,6 +71,13 @@ class MusicCog(MusicPlayerMixin, commands.Cog):
             await vc.move_to(interaction.user.voice.channel)
         is_url = query.startswith("http://") or query.startswith("https://")
         if is_url:
+            if 'spotify.com' in query or 'spotify:' in query:
+                await interaction.followup.send(
+                    "⚠️ **Link Spotify không hỗ trợ trực tiếp.**\n"
+                    "Hãy dùng `/play_next` với tên bài hát hoặc link YouTube.",
+                    ephemeral=True,
+                )
+                return
             await self._handle_url(interaction, vc, query, add_to_front=True)
         else:
             await self._handle_search(interaction, vc, query, add_to_front=True)
@@ -137,11 +153,13 @@ class MusicCog(MusicPlayerMixin, commands.Cog):
 
     @app_commands.command(name="favorite", description="Xem và thêm bài yêu thích vào queue")
     async def favorite(self, interaction: discord.Interaction):
+        logger.info(f"[favorite] user={interaction.user}")
         favs = load_favorites()
         user_favs = favs.get(str(interaction.user.id), [])
         if not user_favs:
             await interaction.response.send_message("❤️ Bạn chưa có bài yêu thích nào.", ephemeral=True)
             return
+        logger.info(f"[favorite] found {len(user_favs)} favorites")
         tracks = [Track(
             title=f['title'], author=f['author'], url=f['url'],
             stream_url=f.get('stream_url', ''), thumbnail=f.get('thumbnail'),
@@ -160,7 +178,7 @@ class MusicCog(MusicPlayerMixin, commands.Cog):
             vc = await interaction.user.voice.channel.connect()
         elif vc.channel != interaction.user.voice.channel:
             await vc.move_to(interaction.user.voice.channel)
-        view = SelectTrackView(self, tracks, interaction.guild, vc, add_to_front=False)
+        view = SelectTrackView(self, tracks, interaction.guild, vc, add_to_front=False, auto_play=True)
         await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
         view.message = await interaction.original_response()
 
@@ -178,9 +196,9 @@ class MusicCog(MusicPlayerMixin, commands.Cog):
 
     async def _handle_search(self, interaction: discord.Interaction, vc: discord.VoiceClient,
                               query: str, add_to_front: bool):
-        print(f"[_handle_search] query={query}")
+        logger.info(f"[_handle_search] query={query}")
         tracks = await self.search_tracks(query)
-        print(f"[_handle_search] found {len(tracks)} tracks")
+        logger.info(f"[_handle_search] found {len(tracks)} tracks")
         if not tracks:
             await interaction.followup.send("❌ Không tìm thấy kết quả.", ephemeral=True)
             return
@@ -241,7 +259,6 @@ class MusicCog(MusicPlayerMixin, commands.Cog):
                 if not data:
                     return (None, 'Playlist', 0, None)
                 entries = data.get('entries', [data])
-                # Lọc bỏ entry None (video unavailable)
                 entries = [e for e in entries if e]
                 first = entries[0] if entries else None
                 return (
@@ -303,7 +320,7 @@ class MusicCog(MusicPlayerMixin, commands.Cog):
                     title=e.get('title', 'Unknown'),
                     author=e.get('uploader') or e.get('channel', 'Unknown'),
                     url=e.get('webpage_url') or e.get('url') or url,
-                    stream_url='',  # sẽ resolve khi phát
+                    stream_url='',
                     thumbnail=e.get('thumbnail') or e.get('thumbnails', [{}])[0].get('url') if e.get('thumbnails') else None,
                     duration=e.get('duration', 0) or 0,
                 )
@@ -312,10 +329,10 @@ class MusicCog(MusicPlayerMixin, commands.Cog):
                 else:
                     player.queue.append(track)
                 added += 1
-            print(f"[_load_playlist_background] Đã thêm {added}/{len(entries)-1} bài từ playlist")
+            logger.info(f"[_load_playlist_background] Đã thêm {added}/{len(entries)-1} bài từ playlist")
             await self._update_ui(guild)
         except Exception as e:
-            print(f"[_load_playlist_background error] {e}")
+            logger.error(f"[_load_playlist_background error] {e}")
 
 
 async def setup(bot: commands.Bot):

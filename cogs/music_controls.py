@@ -1,6 +1,7 @@
 import random
 import time
 import discord
+from .logger import logger
 from .music_core import MusicPlayer, toggle_favorite, save_player_playlist, delete_player_playlist, get_user_playlists
 
 
@@ -231,7 +232,7 @@ class MusicControlView(discord.ui.View):
 
     @discord.ui.button(emoji="⬇️", style=discord.ButtonStyle.secondary, row=2)
     async def btn_download(self, interaction: discord.Interaction, button: discord.ui.Button):
-        print(f"[btn_download] called by {interaction.user}")
+        logger.info(f"[btn_download] called by {interaction.user}")
         player = self._player()
         if not player.current:
             await interaction.response.send_message("Không có bài nào đang phát.", ephemeral=True)
@@ -263,4 +264,4 @@ class MusicControlView(discord.ui.View):
                 view=view,
                 ephemeral=True,
             )
-        print(f"[btn_download] sent")
+        logger.info(f"[btn_download] sent")

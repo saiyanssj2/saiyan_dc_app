@@ -3,6 +3,7 @@ import time
 import discord
 import yt_dlp
 
+from .logger import logger
 from .music_core import (
     Track, MusicPlayer,
     YDL_OPTS_SEARCH, YDL_OPTS_SINGLE,
@@ -20,11 +21,11 @@ class MusicPlayerMixin:
     async def search_tracks(self, query: str) -> list[Track]:
         loop = asyncio.get_running_loop()
         def _search():
-            print(f"[search_tracks] start yt-dlp search: {query}")
+            logger.info(f"[search_tracks] start yt-dlp search: {query}")
             try:
                 with yt_dlp.YoutubeDL(YDL_OPTS_SEARCH) as ydl:
                     data = ydl.extract_info(query, download=False)
-                    print(f"[search_tracks] yt-dlp done, entries={len(data.get('entries', []))}")
+                    logger.info(f"[search_tracks] yt-dlp done, entries={len(data.get('entries', []))}")
                     entries = data.get('entries', [data])
                     results = []
                     for e in entries[:10]:
@@ -40,7 +41,7 @@ class MusicPlayerMixin:
                         ))
                     return results
             except Exception as e:
-                print(f"[search_tracks error] {e}")
+                logger.error(f"[search_tracks error] {e}")
                 return []
         return await loop.run_in_executor(None, _search)
 
@@ -51,10 +52,10 @@ class MusicPlayerMixin:
                 with yt_dlp.YoutubeDL(YDL_OPTS_SINGLE) as ydl:
                     data = ydl.extract_info(track.url, download=False)
                     track.stream_url = data.get('url', '')
-                    print(f"[fetch_stream] {track.title} → {track.stream_url[:60]}...")
+                    logger.info(f"[fetch_stream] {track.title} → {track.stream_url[:60]}...")
                     return track
             except Exception as e:
-                print(f"[fetch_stream error] {e}")
+                logger.error(f"[fetch_stream error] {e}")
                 raise
         return await loop.run_in_executor(None, _fetch)
 
@@ -62,15 +63,22 @@ class MusicPlayerMixin:
 
     async def play_track(self, guild: discord.Guild, voice_client: discord.VoiceClient, track: Track):
         player = self.get_player(guild.id)
-        print(f"[play_track] {track.title} | stream_url={'set' if track.stream_url else 'empty'}")
+        logger.info(f"[play_track] {track.title} | stream_url={'set' if track.stream_url else 'empty'}")
+        logger.debug(f"[play_track] vc.is_connected={voice_client.is_connected()} | vc.is_playing={voice_client.is_playing()} | vc.channel={voice_client.channel}")
 
         if not track.stream_url:
             track = await self.fetch_stream(track)
 
         if not track.stream_url:
-            print(f"[play_track] Không lấy được stream_url, bỏ qua bài này")
+            logger.warning(f"[play_track] Không lấy được stream_url, bỏ qua bài này")
             await self._on_track_end(guild, voice_client)
             return
+
+        # Luôn fetch stream mới để tránh URL hết hạn
+        try:
+            track = await self.fetch_stream(track)
+        except Exception as e:
+            logger.warning(f"[play_track] fetch_stream failed: {e}, dùng stream_url cũ")
 
         player.current = track
         player.seek_offset = 0.0
@@ -79,13 +87,16 @@ class MusicPlayerMixin:
         player.stopped = False
 
         is_local = not track.stream_url.startswith('http')
+        logger.debug(f"[play_track] starting FFmpeg | is_local={is_local} | stream_url={track.stream_url[:80]}...")
         source = discord.FFmpegPCMAudio(track.stream_url, **make_ffmpeg_opts(is_local=is_local))
         source = discord.PCMVolumeTransformer(source, volume=0.0 if player.muted else player.volume)
 
         def after_play(error):
             if error:
-                print(f"[after_play error] {error}")
-                print(f"[after_play] track={track.title} | stream_url={track.stream_url[:60] if track.stream_url else 'empty'}")
+                logger.error(f"[after_play error] {error}")
+                logger.error(f"[after_play] track={track.title} | stream_url={track.stream_url[:60] if track.stream_url else 'empty'}")
+            else:
+                logger.info(f"[after_play] track ended: {track.title}")
             asyncio.run_coroutine_threadsafe(self._on_track_end(guild, voice_client), self.bot.loop)
 
         if voice_client.is_playing() or voice_client.is_paused():
@@ -93,9 +104,11 @@ class MusicPlayerMixin:
             voice_client.stop()
 
         voice_client.play(source, after=after_play)
+        logger.info(f"[play_track] playing: {track.title} | is_playing={voice_client.is_playing()}")
 
     async def _on_track_end(self, guild: discord.Guild, voice_client: discord.VoiceClient):
         player = self.get_player(guild.id)
+        logger.info(f"[_on_track_end] skip_next={player._skip_next_end} | current={player.current.title if player.current else 'none'} | queue={len(player.queue)}")
 
         if player._skip_next_end > 0:
             player._skip_next_end -= 1
@@ -144,15 +157,15 @@ class MusicPlayerMixin:
     async def _seek(self, guild: discord.Guild, voice_client: discord.VoiceClient, seconds: float):
         player = self.get_player(guild.id)
         if not player.current:
-            print(f"[seek] Không có bài đang phát")
+            logger.warning(f"[seek] Không có bài đang phát")
             return
 
         elapsed = player.elapsed()
         new_offset = max(0.0, elapsed + seconds)
-        print(f"[seek] elapsed={elapsed:.1f}s | offset={seconds:+}s | new_offset={new_offset:.1f}s | duration={player.current.duration}")
+        logger.info(f"[seek] elapsed={elapsed:.1f}s | offset={seconds:+}s | new_offset={new_offset:.1f}s | duration={player.current.duration}")
 
         if player.current.duration and new_offset >= player.current.duration:
-            print(f"[seek] Vượt quá duration, bỏ qua")
+            logger.info(f"[seek] Vượt quá duration, bỏ qua")
             return
 
         if not player.current.stream_url:
@@ -168,7 +181,7 @@ class MusicPlayerMixin:
 
         def after_seek(error):
             if error:
-                print(f"[seek error] {error}")
+                logger.error(f"[seek error] {error}")
             asyncio.run_coroutine_threadsafe(self._on_track_end(guild, voice_client), self.bot.loop)
 
         player._skip_next_end += 1
@@ -197,7 +210,7 @@ class MusicPlayerMixin:
                         pass
                 asyncio.create_task(_clear_footer())
         except Exception as e:
-            print(f"[_update_ui error] {e}")
+            logger.error(f"[_update_ui error] {e}")
 
     async def _send_ui(self, interaction: discord.Interaction):
         player = self.get_player(interaction.guild.id)
