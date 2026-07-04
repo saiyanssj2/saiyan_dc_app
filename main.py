@@ -73,21 +73,6 @@ async def on_ready():
     logger.info(f"---")
 
 async def main():
-    # Health check server để Render free tier không sleep
-    from aiohttp import web
-
-    async def health(request):
-        return web.Response(text="OK")
-
-    app = web.Application()
-    app.router.add_get("/", health)
-    app.router.add_get("/health", health)
-    runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, '0.0.0.0', int(os.getenv('PORT', 10000)))
-    await site.start()
-    logger.info(f"[health] HTTP server started on port {os.getenv('PORT', 10000)}")
-
     async with bot:
         await bot.start(os.getenv("DISCORD_TOKEN"))
 
