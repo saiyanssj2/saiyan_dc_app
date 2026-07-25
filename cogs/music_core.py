@@ -1,6 +1,8 @@
 import asyncio
+import base64
 import json
 import os
+import tempfile
 import time
 import discord
 
@@ -12,7 +14,18 @@ if not os.path.exists(FFMPEG_PATH):
 
 FAVORITES_PATH = os.path.join(_BASE, "data", "favorites.json")
 PLAYLISTS_PATH = os.path.join(_BASE, "data", "playlists.json")
+
+# ─── Cookies: ưu tiên env var YOUTUBE_COOKIES (base64), fallback file local ──
 _COOKIES_PATH = os.path.join(_BASE, "cookies.txt")
+_COOKIES_ENV = os.getenv("YOUTUBE_COOKIES")
+if _COOKIES_ENV:
+    # Decode base64 → ghi ra file tạm
+    _cookies_data = base64.b64decode(_COOKIES_ENV)
+    _tmp_cookies = os.path.join(tempfile.gettempdir(), "yt_cookies.txt")
+    with open(_tmp_cookies, 'wb') as f:
+        f.write(_cookies_data)
+    _COOKIES_PATH = _tmp_cookies
+
 _COOKIES_OPTS = {'cookiefile': _COOKIES_PATH} if os.path.exists(_COOKIES_PATH) else {}
 
 # ─── yt-dlp options ──────────────────────────────────────────────────────────
