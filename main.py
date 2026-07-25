@@ -27,9 +27,10 @@ file_handler = FlushFileHandler(os.path.join(_LOG_DIR, 'bot.log'), encoding='utf
 file_handler.setLevel(logging.DEBUG)
 file_handler.setFormatter(logging.Formatter('%(asctime)s | %(levelname)s | %(message)s', datefmt='%Y-%m-%d %H:%M:%S'))
 
-# Console handler - chỉ hiện ERROR trở lên
+# Console handler - trên cloud hiện INFO, local chỉ ERROR
+_is_cloud = os.getenv("RAILWAY_ENVIRONMENT") or os.getenv("YOUTUBE_COOKIES")
 console_handler = logging.StreamHandler(sys.stdout)
-console_handler.setLevel(logging.ERROR)
+console_handler.setLevel(logging.INFO if _is_cloud else logging.ERROR)
 console_handler.setFormatter(logging.Formatter('%(asctime)s | %(levelname)s | %(message)s', datefmt='%Y-%m-%d %H:%M:%S'))
 
 logger = logging.getLogger('saiyan')
