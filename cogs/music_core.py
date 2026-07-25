@@ -28,6 +28,14 @@ if _COOKIES_ENV:
 
 _COOKIES_OPTS = {'cookiefile': _COOKIES_PATH} if os.path.exists(_COOKIES_PATH) else {}
 
+# Log cookies status khi khởi động
+import logging as _logging
+_logger = _logging.getLogger('saiyan')
+if _COOKIES_OPTS:
+    _logger.info(f"[cookies] Loaded from: {_COOKIES_PATH} ({os.path.getsize(_COOKIES_PATH)} bytes)")
+else:
+    _logger.warning(f"[cookies] NO COOKIES FOUND! Path={_COOKIES_PATH}, env={'set' if _COOKIES_ENV else 'unset'}")
+
 # ─── yt-dlp options ──────────────────────────────────────────────────────────
 YDL_OPTS_SEARCH = {
     'format': 'bestaudio/best',

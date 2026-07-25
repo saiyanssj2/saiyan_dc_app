@@ -64,13 +64,19 @@ class MusicPlayerMixin:
     async def play_track(self, guild: discord.Guild, voice_client: discord.VoiceClient, track: Track):
         player = self.get_player(guild.id)
         logger.info(f"[play_track] {track.title} | stream_url={'set' if track.stream_url else 'empty'}")
-        logger.debug(f"[play_track] vc.is_connected={voice_client.is_connected()} | vc.is_playing={voice_client.is_playing()} | vc.channel={voice_client.channel}")
+        logger.info(f"[play_track] vc.connected={voice_client.is_connected()} | vc.channel={voice_client.channel}")
 
         if not track.stream_url:
-            track = await self.fetch_stream(track)
+            try:
+                track = await self.fetch_stream(track)
+            except Exception as e:
+                logger.error(f"[play_track] fetch_stream FAILED: {e}")
+                logger.error(f"[play_track] bỏ qua bài: {track.title}")
+                await self._on_track_end(guild, voice_client)
+                return
 
         if not track.stream_url:
-            logger.warning(f"[play_track] Không lấy được stream_url, bỏ qua bài này")
+            logger.warning(f"[play_track] stream_url vẫn empty sau fetch, bỏ qua")
             await self._on_track_end(guild, voice_client)
             return
 
@@ -78,7 +84,7 @@ class MusicPlayerMixin:
         try:
             track = await self.fetch_stream(track)
         except Exception as e:
-            logger.warning(f"[play_track] fetch_stream failed: {e}, dùng stream_url cũ")
+            logger.warning(f"[play_track] re-fetch failed: {e}, dùng stream_url cũ")
 
         player.current = track
         player.seek_offset = 0.0
